@@ -157,7 +157,10 @@ public class MainActivity extends GameActivity {
         if (resultCode == RESULT_OK && pendingConfig != null) {
             startVpn(pendingConfig, pendingNotification);
         } else {
-            // The Rust side shows its own text for "permission".
+            // The Rust side shows its own text for "permission". Kept as the service's state too:
+            // onResume, which runs right after this, sends that state again.
+            XrayVpnService.state = XrayVpnService.STATE_ERROR;
+            XrayVpnService.message = "permission";
             emit(XrayVpnService.STATE_ERROR, "permission");
         }
         pendingConfig = null;

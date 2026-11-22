@@ -31,10 +31,27 @@ android {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
+    // The release key: keystore.properties next to this file (not in git: storeFile, keyAlias) and
+    // the password in the environment variable it names (storePasswordEnv). Without the file the
+    // build is signed with the debug key, so anyone can build it.
+    def keyFile = file('keystore.properties')
+    signingConfigs {
+        if (keyFile.exists()) {
+            def key = new Properties()
+            keyFile.withInputStream { key.load(it) }
+            def password = System.getenv(key.getProperty('storePasswordEnv'))
+            if (password == null) throw new GradleException("Set ${key.getProperty('storePasswordEnv')} to the keystore password")
+            release {
+                storeFile file(key.getProperty('storeFile'))
+                keyAlias key.getProperty('keyAlias')
+                storePassword password
+                keyPassword password
+            }
+        }
+    }
     buildTypes {
-        // Signed with the debug key so it installs right away. Use your own key to publish.
         release {
-            signingConfig signingConfigs.debug
+            signingConfig keyFile.exists() ? signingConfigs.release : signingConfigs.debug
             // R8: shrinks and renames the Java code; proguard-rules.pro keeps what JNI calls by name.
             minifyEnabled true
             shrinkResources true

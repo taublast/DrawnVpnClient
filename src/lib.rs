@@ -67,8 +67,8 @@ const ROUTE_SETTINGS: &str = "settings";
 
 /// GitHub's latest release of this app, asked at start and at most once a day.
 const LATEST_RELEASE: &str = "https://api.github.com/repos/taublast/DrawnVpnClient/releases/latest";
-/// The release file for this build: drawnvless-<version>-android-arm64.apk.
-const RELEASE_ASSET: &str = "-android-arm64.apk";
+/// The release file for this build, short to type and share: drawnvpn-010-arm64.apk for 0.1.0.
+const RELEASE_ASSET: &str = "-arm64.apk";
 const UPDATE_CHECK_EVERY: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
 
 fn rgb(v: u32) -> Color {

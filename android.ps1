@@ -43,11 +43,19 @@ try {
     if ($LASTEXITCODE) { throw "gradle failed" }
     Copy-Item target\android\gradle\outputs\apk\release\drawnvless-release.apk target\android\drawnvless.apk -Force
     Write-Host "APK: $PSScriptRoot\target\android\drawnvless.apk"
+    # Release files under short names people can type: drawnvpn-010-arm64.apk and drawnvpn-010.aab
+    # for version 0.1.0.
+    $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
+    $short = "drawnvpn-$($version -replace '\.', '')"
+    if ($Abi -eq "arm64-v8a") {
+        Copy-Item target\android\drawnvless.apk "target\android\$short-arm64.apk" -Force
+        Write-Host "Release APK: $PSScriptRoot\target\android\$short-arm64.apk"
+    }
     if ($Bundle) {
         & android\gradlew.bat -p android --project-cache-dir "$PSScriptRoot\target\android\gradle-cache" -q bundleRelease
         if ($LASTEXITCODE) { throw "gradle bundle failed" }
-        Copy-Item target\android\gradle\outputs\bundle\release\drawnvless-release.aab target\android\drawnvless.aab -Force
-        Write-Host "AAB: $PSScriptRoot\target\android\drawnvless.aab"
+        Copy-Item target\android\gradle\outputs\bundle\release\drawnvless-release.aab "target\android\$short.aab" -Force
+        Write-Host "AAB: $PSScriptRoot\target\android\$short.aab"
     }
 
     if ($Install) {

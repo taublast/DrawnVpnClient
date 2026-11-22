@@ -22,7 +22,8 @@ is newer than the app, a banner offers its APK (Download opens it in the browser
 version is not offered again). It can be turned off in Settings.
 
 Releases: tag `v<version>` (the `version` in `Cargo.toml`, the same as `versionName`), with the APK
-attached as `drawnvless-<version>-android-arm64.apk`.
+attached with a short name: `drawnvpn-<version without dots>-arm64.apk`, e.g. `drawnvpn-010-arm64.apk`
+for 0.1.0. The app finds it by its `-arm64.apk` ending.
 
 ## Build
 

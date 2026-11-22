@@ -40,11 +40,11 @@ mod tests {
     #[test]
     fn picks_a_newer_release_and_its_apk() {
         let json = r#"{"tag_name":"v0.2.0","html_url":"https://github.com/x/releases/tag/v0.2.0","assets":[
-            {"name":"drawnvless-0.2.0-android-arm64.apk","browser_download_url":"https://dl/app.apk"}]}"#;
-        assert_eq!(newer(json, "0.1.0", "-android-arm64.apk"), Some(Update { version: "0.2.0".into(), url: "https://dl/app.apk".into() }));
+            {"name":"drawnvpn-020-arm64.apk","browser_download_url":"https://dl/app.apk"}]}"#;
+        assert_eq!(newer(json, "0.1.0", "-arm64.apk"), Some(Update { version: "0.2.0".into(), url: "https://dl/app.apk".into() }));
         assert_eq!(newer(json, "0.1.0", "-other.apk").unwrap().url, "https://github.com/x/releases/tag/v0.2.0");
-        assert_eq!(newer(json, "0.2.0", "-android-arm64.apk"), None);
-        assert_eq!(newer(json, "0.10.0", "-android-arm64.apk"), None);
+        assert_eq!(newer(json, "0.2.0", "-arm64.apk"), None);
+        assert_eq!(newer(json, "0.10.0", "-arm64.apk"), None);
         assert_eq!(newer(r#"{"message":"Not Found"}"#, "0.1.0", "x"), None);
         assert_eq!(newer("", "0.1.0", "x"), None);
     }
