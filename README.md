@@ -27,10 +27,11 @@ for 0.1.0. The app finds it by its `-arm64.apk` ending.
 
 ## Build
 
-`.\android.ps1 -Install` builds `target\android\drawnvless.apk` (arm64), installs it and starts it.
-`-Bundle` also builds `target\android\drawnvless.aab` for Google Play. Release builds: Java shrunk
+`.\android.ps1 -Install` builds `target\android\drawnvless.apk` (arm64), installs it and starts it;
+the same APK is also saved under its release name, `target\android\drawnvpn-010-arm64.apk` for 0.1.0.
+`-Bundle` also builds `target\android\drawnvpn-010.aab` for Google Play. Release builds: Java shrunk
 and renamed by R8 (`android\proguard-rules.pro` keeps what JNI calls by name), the Rust library
-stripped. Signed with the release key named in `androidkeystore.properties` (not in git: `storeFile`,
+stripped. Signed with the release key named in `android\keystore.properties` (not in git: `storeFile`,
 `keyAlias`, and `storePasswordEnv`, the environment variable holding the password); without that
 file, with the debug key.
 
