@@ -1,0 +1,150 @@
+//! The app's texts in every language. A new language: one more `Texts` and a line in `Lang`.
+
+#[derive(Clone, Copy, PartialEq, Default)]
+pub enum Lang {
+    /// The phone's language when the app has it, else English.
+    #[default]
+    System,
+    En,
+    Ru,
+}
+
+impl Lang {
+    pub fn code(self) -> &'static str {
+        match self {
+            Lang::System => "system",
+            Lang::En => "en",
+            Lang::Ru => "ru",
+        }
+    }
+
+    pub fn from_code(code: &str) -> Lang {
+        match code {
+            "en" => Lang::En,
+            "ru" => Lang::Ru,
+            _ => Lang::System,
+        }
+    }
+
+    /// The texts for this choice; `system` is the phone's language code ("ru", "en", ...).
+    pub fn texts(self, system: &str) -> &'static Texts {
+        match self {
+            Lang::En => &EN,
+            Lang::Ru => &RU,
+            Lang::System if system == "ru" => &RU,
+            Lang::System => &EN,
+        }
+    }
+}
+
+pub struct Texts {
+    pub not_connected: &'static str,
+    pub connecting: &'static str,
+    pub connected: &'static str,
+    pub could_not_connect: &'static str,
+    pub no_answer: &'static str,
+    pub no_answer_detail: &'static str,
+    pub answers_in: &'static str,
+    pub permission_denied: &'static str,
+    pub no_server: &'static str,
+    pub servers: &'static str,
+    pub empty: &'static str,
+    pub paste_link: &'static str,
+    pub delete: &'static str,
+    pub connect: &'static str,
+    pub disconnect: &'static str,
+    pub selected: &'static str,
+    pub clipboard_empty: &'static str,
+    pub not_a_link: &'static str,
+    pub already_added: &'static str,
+    pub added: &'static str,
+    pub added_many: &'static str,
+    pub tap_again_to_remove: &'static str,
+    pub removed: &'static str,
+    pub add_server_first: &'static str,
+    pub no_encryption: &'static str,
+    pub vpn_is_on: &'static str,
+    pub settings: &'static str,
+    pub back: &'static str,
+    pub language: &'static str,
+    pub system_language: &'static str,
+    pub about: &'static str,
+    pub version: &'static str,
+}
+
+impl Texts {
+    /// `template` with `{}` replaced by `value`.
+    pub fn fill(template: &str, value: impl std::fmt::Display) -> String {
+        template.replacen("{}", &value.to_string(), 1)
+    }
+}
+
+pub static EN: Texts = Texts {
+    not_connected: "Not connected",
+    connecting: "Connecting…",
+    connected: "Connected",
+    could_not_connect: "Could not connect",
+    no_answer: "Connected, no answer",
+    no_answer_detail: "The server does not answer",
+    answers_in: "The server answers in {} ms",
+    permission_denied: "The VPN permission was not given",
+    no_server: "No server",
+    servers: "SERVERS",
+    empty: "No servers yet.\nCopy a vless:// link and tap Paste link, or open the link with this app.",
+    paste_link: "Paste link",
+    delete: "Delete",
+    connect: "Connect",
+    disconnect: "Disconnect",
+    selected: "selected",
+    clipboard_empty: "The clipboard is empty: copy a vless:// link first",
+    not_a_link: "This is not a vless:// link",
+    already_added: "This server is already in the list",
+    added: "Added {}",
+    added_many: "Added {} servers",
+    tap_again_to_remove: "Tap Delete again to remove {}",
+    removed: "Removed {}",
+    add_server_first: "Add a server first: copy its vless:// link, then tap Paste link",
+    no_encryption: "No encryption",
+    vpn_is_on: "VPN is on",
+    settings: "Settings",
+    back: "Back",
+    language: "LANGUAGE",
+    system_language: "Phone language",
+    about: "ABOUT",
+    version: "Version",
+};
+
+pub static RU: Texts = Texts {
+    not_connected: "Не подключено",
+    connecting: "Подключение…",
+    connected: "Подключено",
+    could_not_connect: "Не удалось подключиться",
+    no_answer: "Подключено, нет ответа",
+    no_answer_detail: "Сервер не отвечает",
+    answers_in: "Сервер отвечает за {} мс",
+    permission_denied: "Разрешение на VPN не получено",
+    no_server: "Нет сервера",
+    servers: "СЕРВЕРЫ",
+    empty: "Серверов пока нет.\nСкопируйте ссылку vless:// и нажмите «Вставить ссылку» или откройте ссылку этим приложением.",
+    paste_link: "Вставить ссылку",
+    delete: "Удалить",
+    connect: "Подключить",
+    disconnect: "Отключить",
+    selected: "выбран",
+    clipboard_empty: "Буфер обмена пуст: сначала скопируйте ссылку vless://",
+    not_a_link: "Это не ссылка vless://",
+    already_added: "Этот сервер уже в списке",
+    added: "Добавлен {}",
+    added_many: "Добавлено серверов: {}",
+    tap_again_to_remove: "Нажмите «Удалить» ещё раз, чтобы удалить {}",
+    removed: "Удалён {}",
+    add_server_first: "Сначала добавьте сервер: скопируйте его ссылку vless:// и нажмите «Вставить ссылку»",
+    no_encryption: "Без шифрования",
+    vpn_is_on: "VPN включён",
+    settings: "Настройки",
+    back: "Назад",
+    language: "ЯЗЫК",
+    system_language: "Язык телефона",
+    about: "О ПРИЛОЖЕНИИ",
+    version: "Версия",
+};

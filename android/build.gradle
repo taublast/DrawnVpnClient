@@ -1,0 +1,53 @@
+// The APK: libdrawnvless.so (the DrawnUI app, built by ../android.ps1 with cargo-ndk) under
+// MainActivity (a GameActivity), the VPN service in Java, and Xray-core from libv2ray.aar
+// (AndroidLibXrayLite: Xray-core built with gomobile, its own TUN on the VpnService fd).
+plugins {
+    id 'com.android.application' version '8.5.2'
+}
+
+def root = file('..')
+layout.buildDirectory = new File(root, 'target/android/gradle')
+
+android {
+    namespace 'com.appomobi.drawnvless'
+    compileSdk 36
+    defaultConfig {
+        applicationId 'com.appomobi.drawnvless'
+        minSdk 26
+        targetSdk 36
+        versionCode 1
+        versionName '0.1'
+        // Phones only: the AAR also carries armv7 / x86 / x86_64 Go libraries (about 33 MB each).
+        ndk { abiFilters 'arm64-v8a' }
+    }
+    sourceSets.main {
+        manifest.srcFile 'AndroidManifest.xml'
+        res.srcDirs = ['res']
+        java.srcDirs = ['java']
+        jniLibs.srcDirs = [new File(root, 'target/android/lib')]
+        assets.srcDirs = [new File(root, 'target/android/stage')]
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    buildTypes {
+        // Signed with the debug key so it installs right away. Use your own key to publish.
+        release {
+            signingConfig signingConfigs.debug
+            // R8: shrinks and renames the Java code; proguard-rules.pro keeps what JNI calls by name.
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+}
+
+dependencies {
+    implementation files('libs/libv2ray.aar')
+    implementation 'androidx.games:games-activity:4.4.0'
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'androidx.core:core:1.13.0'
+    // AppCompat pulls kotlin-stdlib 1.8 and the old jdk7 / jdk8 parts, which duplicate its classes.
+    implementation platform('org.jetbrains.kotlin:kotlin-bom:1.8.22')
+}
