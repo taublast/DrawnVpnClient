@@ -17,6 +17,7 @@ mod platform {
     pub fn set_waker(_waker: drawnui::Waker, _id: drawnui::prelude::ControlId) {}
     pub fn connect(_config: String, _notification: &str) {}
     pub fn disconnect() {}
+    pub fn test() {}
     pub fn clipboard_text() -> String {
         String::new()
     }
@@ -49,7 +50,8 @@ const RED: u32 = 0xEF4444;
 
 // Material Icons (assets/fonts/icons.ttf, a subset).
 const ICON_POWER: &str = "\u{e8ac}";
-const ICON_PASTE: &str = "\u{e14f}";
+const ICON_ADD: &str = "\u{e145}";
+const ICON_TEST: &str = "\u{e640}";
 const ICON_DELETE: &str = "\u{e872}";
 const ICON_SHIELD: &str = "\u{e32a}";
 const ICON_SETTINGS: &str = "\u{e8b8}";
@@ -120,8 +122,12 @@ struct App {
     detail: String,
     /// The last import or delete message.
     notice: String,
-    /// Delete was tapped once: the next tap deletes.
-    confirm_delete: bool,
+    /// A connection test is running.
+    testing: bool,
+    /// The open server menu or delete question.
+    popup: Option<PopupId>,
+    /// The server the menu was opened for, and its card: the delete question opens there too.
+    menu_for: Option<(usize, ControlId)>,
     lang: Lang,
     /// The phone's language code.
     system_lang: String,
@@ -169,6 +175,7 @@ impl App {
             Event::State(code, text) => {
                 self.vpn = Vpn::from_code(code);
                 self.detail = text;
+                self.testing = false;
             }
             Event::Link(text) => self.import(&text, cx),
         }
@@ -178,6 +185,7 @@ impl App {
     fn status_detail(&self) -> String {
         let t = self.t();
         match self.vpn {
+            _ if self.testing && self.vpn.is_on() => t.testing.to_owned(),
             Vpn::Off | Vpn::Connecting => self.servers.get(self.selected).map_or(t.no_server.to_owned(), |s| s.name.clone()),
             Vpn::Connected => Texts::fill(t.answers_in, &self.detail),
             Vpn::NoResponse => t.no_answer_detail.to_owned(),
@@ -211,52 +219,72 @@ impl App {
             1 => Texts::fill(t.added, &added[0]),
             n => Texts::fill(t.added_many, n),
         };
-        self.confirm_delete = false;
         cx.items_reset(self.list);
         self.save();
     }
 
-    fn delete_selected(&mut self, cx: &mut Cx) {
-        if self.servers.is_empty() || self.vpn.is_on() {
+    /// The server at `index` is the one the tunnel runs through.
+    fn is_connected_to(&self, index: usize) -> bool {
+        self.vpn.is_on() && index == self.selected
+    }
+
+    fn delete(&mut self, index: usize, cx: &mut Cx) {
+        if index >= self.servers.len() || self.is_connected_to(index) {
             return;
         }
-        let t = self.t();
-        if !self.confirm_delete {
-            self.confirm_delete = true;
-            self.notice = Texts::fill(t.tap_again_to_remove, &self.servers[self.selected].name);
-            return;
+        let removed = self.servers.remove(index);
+        if self.selected > index || self.selected >= self.servers.len() {
+            self.selected = self.selected.saturating_sub(1);
         }
-        let removed = self.servers.remove(self.selected);
-        self.selected = self.selected.min(self.servers.len().saturating_sub(1));
-        self.confirm_delete = false;
-        self.notice = Texts::fill(t.removed, &removed.name);
+        self.notice = Texts::fill(self.t().removed, &removed.name);
         cx.items_reset(self.list);
         self.save();
     }
 
-    fn toggle(&mut self) {
-        self.notice.clear();
-        self.confirm_delete = false;
+    /// The big button: connects the selected server, or disconnects.
+    fn toggle(&mut self, cx: &mut Cx) {
         if self.vpn.is_on() {
+            self.notice.clear();
             platform::disconnect();
-            return;
-        }
-        let Some(server) = self.servers.get(self.selected) else {
+        } else if self.servers.is_empty() {
             self.notice = self.t().add_server_first.to_owned();
-            return;
-        };
+        } else {
+            self.connect(self.selected, cx);
+        }
+    }
+
+    /// Connects through the server at `index` (from another one: the service switches).
+    fn connect(&mut self, index: usize, cx: &mut Cx) {
+        let Some(server) = self.servers.get(index) else { return };
+        let config = server.xray_config();
+        self.notice.clear();
+        if self.selected != index {
+            self.selected = index;
+            cx.items_reset(self.list);
+            self.save();
+        }
         self.vpn = Vpn::Connecting;
         self.detail.clear();
-        platform::connect(server.xray_config(), self.t().vpn_is_on);
+        platform::connect(config, self.t().vpn_is_on);
+    }
+
+    fn test(&mut self) {
+        self.testing = true;
+        platform::test();
     }
 
     fn set_language(&mut self, lang: Lang, cx: &mut Cx) {
         self.lang = lang;
         // Messages were written in the old language.
         self.notice.clear();
-        self.confirm_delete = false;
         cx.items_reset(self.list);
         self.save();
+    }
+
+    fn close_popup(&mut self, cx: &mut Cx) {
+        if let Some(popup) = self.popup.take() {
+            cx.close_popup_window(popup);
+        }
     }
 }
 
@@ -346,7 +374,7 @@ fn power_button() -> Build<SkiaShape> {
             me.set_stroke_color(rgb(if app.vpn == Vpn::Off { MUTED } else { app.vpn.color() }));
             me.set_accessibility_label(if app.vpn.is_on() { app.t().disconnect } else { app.t().connect });
         })
-        .on_tapped(|_me, app: &mut App, _cx| app.toggle())
+        .on_tapped(|_me, app: &mut App, cx| app.toggle(cx))
         .children(
             SkiaLabel::new(ICON_POWER)
                 .font_family("FontIcons")
@@ -421,15 +449,10 @@ fn server_cell() -> (Build<SkiaShape>, CellHandles) {
     let cell = card()
         .assign(&mut h.card)
         .on_tapped(|me, app: &mut App, cx| {
-            if let Some(index) = me.base().context_index
-                && index != app.selected
-            {
-                app.selected = index;
-                app.confirm_delete = false;
-                app.notice.clear();
-                cx.items_reset(app.list);
-                app.save();
-            }
+            let Some(index) = me.base().context_index else { return };
+            app.close_popup(cx);
+            app.menu_for = Some((index, me.id()));
+            app.popup = Some(cx.open_popup_window(server_menu(app, index), me.id(), PopupWindowOptions::default()));
         })
         .children(SkiaStack::new().spacing(3).padding((16, 12)).children((
             SkiaLabel::new("").font_family("FontTextBold").font_size(16).text_color(rgb(TEXT)).max_lines(1).assign(&mut h.name),
@@ -466,46 +489,145 @@ fn actions() -> Build<SkiaLayout> {
                 me.set_text(app.notice.clone());
                 me.set_is_visible(!app.notice.is_empty());
             }),
-        // Paste is the main action and has the longer caption: it gets more room.
-        SkiaGrid::new().column_definitions("3*,2*").column_spacing(10).children((
-            action_button(ICON_PASTE, |t| t.paste_link, ACCENT)
-                .column(0)
-                .on_tapped(|_me, app: &mut App, cx| app.import(&platform::clipboard_text(), cx)),
-            action_button(ICON_DELETE, |t| t.delete, SURFACE)
-                .column(1)
-                .observe(|me, app: &App| {
-                    me.set_background_color(rgb(if app.confirm_delete { RED } else { SURFACE }));
-                    me.set_opacity(if app.servers.is_empty() || app.vpn.is_on() { 0.4 } else { 1.0 });
-                })
-                .on_tapped(|_me, app: &mut App, cx| app.delete_selected(cx)),
-        )),
+        import_button(),
     ))
 }
 
-fn action_button(icon: &'static str, text: fn(&Texts) -> &'static str, color: u32) -> Build<SkiaShape> {
+/// A small pill in the middle: adds the vless:// links on the clipboard.
+fn import_button() -> Build<SkiaShape> {
     SkiaShape::new()
-        .corner_radius(14)
-        .height_request(52)
-        .fill_x()
-        .background_color(rgb(color))
+        .corner_radius(22)
+        .height_request(44)
+        .horizontal_options(LayoutOptions::Center)
+        // Outline only: it is used rarely, the connection is what the screen is about.
+        .stroke_color(rgb(MUTED))
+        .stroke_width(1.5)
         .animation_tapped(SkiaTouchAnimation::Ripple)
         .accessibility_role(Aria::BUTTON)
-        .observe(move |me, app: &App| me.set_accessibility_label(text(app.t())))
-        .children(SkiaRow::new().spacing(8).center().children((
-            SkiaLabel::new(icon)
+        .observe(|me, app: &App| me.set_accessibility_label(app.t().import))
+        .on_tapped(|_me, app: &mut App, cx| app.import(&platform::clipboard_text(), cx))
+        .children(SkiaRow::new().spacing(6).padding((16, 0, 20, 0)).vertical_options(LayoutOptions::Center).children((
+            SkiaLabel::new(ICON_ADD)
                 .font_family("FontIcons")
                 .font_size(20)
-                .text_color(rgb(TEXT))
+                .text_color(rgb(MUTED))
                 .vertical_options(LayoutOptions::Center)
                 .accessibility_role(Aria::PRESENTATION),
             SkiaLabel::new("")
                 .font_family("FontTextBold")
                 .font_size(15)
-                .text_color(rgb(TEXT))
+                .text_color(rgb(MUTED))
                 .vertical_options(LayoutOptions::Center)
                 .accessibility_role(Aria::PRESENTATION)
-                .observe(move |me, app: &App| me.set_text(text(app.t()))),
+                .observe(|me, app: &App| me.set_text(app.t().import)),
         )))
+}
+
+// ---------------------------------------------------------------- server menu
+
+/// The panel of a menu or question over a server card.
+fn popup_panel() -> Build<SkiaShape> {
+    SkiaShape::new()
+        .corner_radius(14)
+        .width_request(250)
+        .background_color(rgb(SURFACE_HI))
+        .stroke_color(rgb(LINE))
+        .stroke_width(1)
+        .padding((0, 6))
+}
+
+/// What can be done with server `index`: the main action first, removing it last.
+fn server_menu(app: &App, index: usize) -> Build<SkiaShape> {
+    let t = app.t();
+    let mut items = Vec::new();
+    if app.is_connected_to(index) {
+        items.push(menu_item(ICON_POWER, t.disconnect, TEXT, |app, _index, cx| app.toggle(cx)));
+        items.push(menu_item(ICON_TEST, t.test_connection, TEXT, |app, _index, _cx| app.test()));
+    } else {
+        items.push(menu_item(ICON_POWER, t.connect, TEXT, |app, index, cx| app.connect(index, cx)));
+        items.push(menu_item(ICON_DELETE, t.delete, RED, |app, index, cx| {
+            if let Some((_, card)) = app.menu_for {
+                app.menu_for = Some((index, card));
+                app.popup = Some(cx.open_popup_window(delete_question(app, index), card, PopupWindowOptions::default()));
+            }
+        }));
+    }
+    popup_panel()
+        .accessibility_role(Aria::MENU)
+        .accessibility_label(app.servers.get(index).map_or(String::new(), |s| s.name.clone()))
+        .children(SkiaStack::new().fill_x().children(items))
+}
+
+/// A menu line: `action(app, server index, cx)` runs after the menu closed.
+fn menu_item(icon: &'static str, text: &'static str, color: u32, action: fn(&mut App, usize, &mut Cx)) -> Build<SkiaLayout> {
+    SkiaRow::new()
+        .fill_x()
+        .height_request(48)
+        .padding((16, 0))
+        .spacing(14)
+        .animation_tapped(SkiaTouchAnimation::Ripple)
+        .accessibility_role(Aria::MENU_ITEM)
+        .accessibility_label(text)
+        .on_tapped(move |_me, app: &mut App, cx| {
+            let index = app.menu_for.map(|(index, _)| index);
+            app.close_popup(cx);
+            if let Some(index) = index {
+                action(app, index, cx);
+            }
+        })
+        .children((
+            SkiaLabel::new(icon)
+                .font_family("FontIcons")
+                .font_size(22)
+                .text_color(rgb(color))
+                .vertical_options(LayoutOptions::Center)
+                .accessibility_role(Aria::PRESENTATION),
+            SkiaLabel::new(text)
+                .font_size(16)
+                .text_color(rgb(color))
+                .vertical_options(LayoutOptions::Center)
+                .accessibility_role(Aria::PRESENTATION),
+        ))
+}
+
+/// "Delete Serbia?" with Cancel and Delete.
+fn delete_question(app: &App, index: usize) -> Build<SkiaShape> {
+    let t = app.t();
+    let question = Texts::fill(t.delete_question, app.servers.get(index).map_or("", |s| s.name.as_str()));
+    let button = |text: &'static str, color: u32, delete: bool| {
+        SkiaShape::new()
+            .corner_radius(10)
+            .height_request(40)
+            .fill_x()
+            .background_color(rgb(color))
+            .animation_tapped(SkiaTouchAnimation::Ripple)
+            .accessibility_role(Aria::BUTTON)
+            .accessibility_label(text)
+            .on_tapped(move |_me, app: &mut App, cx| {
+                let index = app.menu_for.map(|(index, _)| index);
+                app.close_popup(cx);
+                if delete && let Some(index) = index {
+                    app.delete(index, cx);
+                }
+            })
+            .children(
+                SkiaLabel::new(text)
+                    .font_family("FontTextBold")
+                    .font_size(15)
+                    .text_color(rgb(TEXT))
+                    .center()
+                    .accessibility_role(Aria::PRESENTATION),
+            )
+    };
+    popup_panel().accessibility_modal(true).accessibility_label(question.clone()).children(
+        SkiaStack::new().fill_x().padding((16, 10, 16, 10)).spacing(14).children((
+            SkiaLabel::new(question).font_family("FontTextBold").font_size(16).text_color(rgb(TEXT)).fill_x(),
+            SkiaGrid::new()
+                .column_definitions("*,*")
+                .column_spacing(10)
+                .children((button(t.cancel, SURFACE, false).column(0), button(t.delete, RED, true).column(1))),
+        )),
+    )
 }
 
 // ---------------------------------------------------------------- settings page

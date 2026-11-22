@@ -85,10 +85,12 @@ public class MainActivity extends GameActivity {
     }
 
     public void vpnDisconnect() {
-        runOnUiThread(() -> {
-            Intent intent = new Intent(this, XrayVpnService.class).setAction(XrayVpnService.ACTION_STOP);
-            startService(intent);
-        });
+        runOnUiThread(() -> startService(new Intent(this, XrayVpnService.class).setAction(XrayVpnService.ACTION_STOP)));
+    }
+
+    /** A test request through the running tunnel; the service reports the result as its state. */
+    public void vpnTest() {
+        runOnUiThread(() -> startService(new Intent(this, XrayVpnService.class).setAction(XrayVpnService.ACTION_TEST)));
     }
 
     /** The clipboard's text, or "" (Android lets only the focused app read it). */

@@ -23,6 +23,7 @@ import libv2ray.Libv2ray;
 public class XrayVpnService extends VpnService implements CoreCallbackHandler {
     static final String ACTION_START = "com.appomobi.drawnvless.START";
     static final String ACTION_STOP = "com.appomobi.drawnvless.STOP";
+    static final String ACTION_TEST = "com.appomobi.drawnvless.TEST";
     static final String EXTRA_CONFIG = "config";
     static final String EXTRA_NOTIFICATION = "notification";
 
@@ -59,6 +60,10 @@ public class XrayVpnService extends VpnService implements CoreCallbackHandler {
             new Thread(this::stopVpn).start();
             return START_NOT_STICKY;
         }
+        if (ACTION_TEST.equals(intent.getAction())) {
+            new Thread(this::probe).start();
+            return START_NOT_STICKY;
+        }
         final String config = intent.getStringExtra(EXTRA_CONFIG);
         startInForeground(intent.getStringExtra(EXTRA_NOTIFICATION));
         report(STATE_CONNECTING, "Connecting");
@@ -93,6 +98,14 @@ public class XrayVpnService extends VpnService implements CoreCallbackHandler {
                 stopSelf();
                 return;
             }
+            probe();
+        }
+    }
+
+    /** A test request through the server: connected with its delay, or no answer. */
+    private void probe() {
+        synchronized (lock) {
+            if (core == null) return;
             try {
                 long ms = core.measureDelay(PROBE_URL);
                 report(STATE_CONNECTED, String.valueOf(ms)); // milliseconds; the app adds the unit

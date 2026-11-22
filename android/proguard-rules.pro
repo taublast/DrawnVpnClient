@@ -2,6 +2,7 @@
 -keep class com.appomobi.drawnvless.MainActivity {
     public void vpnConnect(java.lang.String, java.lang.String);
     public void vpnDisconnect();
+    public void vpnTest();
     public java.lang.String clipboardText();
     public java.lang.String systemLanguage();
     public java.lang.String coreVersion();

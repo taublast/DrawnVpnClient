@@ -73,6 +73,11 @@ pub fn disconnect() {
     with_activity(|env, activity| env.call_method(activity, "vpnDisconnect", "()V", &[]).map(|_| ()));
 }
 
+/// A test request through the running tunnel; the result comes back as a state event.
+pub fn test() {
+    with_activity(|env, activity| env.call_method(activity, "vpnTest", "()V", &[]).map(|_| ()));
+}
+
 /// Calls a `()String` method of the activity.
 fn activity_string(method: &str) -> String {
     with_activity(|env, activity| {
