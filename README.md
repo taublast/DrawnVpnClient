@@ -30,7 +30,9 @@ for 0.1.0. The app finds it by its `-arm64.apk` ending.
 `.\android.ps1 -Install` builds `target\android\drawnvless.apk` (arm64), installs it and starts it.
 `-Bundle` also builds `target\android\drawnvless.aab` for Google Play. Release builds: Java shrunk
 and renamed by R8 (`android\proguard-rules.pro` keeps what JNI calls by name), the Rust library
-stripped. Signed with the debug key until the app gets its own key.
+stripped. Signed with the release key named in `androidkeystore.properties` (not in git: `storeFile`,
+`keyAlias`, and `storePasswordEnv`, the environment variable holding the password); without that
+file, with the debug key.
 
 Needs the Android SDK (platform 36), NDK 26, a JDK 17+, cargo-ndk and the Rust Android targets.
 The Xray-core library (`android\libs\libv2ray.aar`) is downloaded by the build script.
