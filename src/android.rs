@@ -78,6 +78,14 @@ pub fn test() {
     with_activity(|env, activity| env.call_method(activity, "vpnTest", "()V", &[]).map(|_| ()));
 }
 
+/// Puts `text` on the clipboard.
+pub fn copy_text(text: &str) {
+    with_activity(|env, activity| {
+        let text = env.new_string(text)?;
+        env.call_method(activity, "copyText", "(Ljava/lang/String;)V", &[JValue::Object(&text)]).map(|_| ())
+    });
+}
+
 /// Calls a `()String` method of the activity.
 fn activity_string(method: &str) -> String {
     with_activity(|env, activity| {

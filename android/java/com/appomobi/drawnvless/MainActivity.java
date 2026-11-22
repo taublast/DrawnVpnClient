@@ -103,6 +103,14 @@ public class MainActivity extends GameActivity {
         return text == null ? "" : text.toString();
     }
 
+    /** Puts text on the clipboard. */
+    public void copyText(final String text) {
+        runOnUiThread(() -> {
+            ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+            if (clipboard != null) clipboard.setPrimaryClip(ClipData.newPlainText("vless", text));
+        });
+    }
+
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);

@@ -4,6 +4,7 @@
     public void vpnDisconnect();
     public void vpnTest();
     public java.lang.String clipboardText();
+    public void copyText(java.lang.String);
     public java.lang.String systemLanguage();
     public java.lang.String coreVersion();
     native <methods>;

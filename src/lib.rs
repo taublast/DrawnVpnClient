@@ -18,6 +18,7 @@ mod platform {
     pub fn connect(_config: String, _notification: &str) {}
     pub fn disconnect() {}
     pub fn test() {}
+    pub fn copy_text(_text: &str) {}
     pub fn clipboard_text() -> String {
         String::new()
     }
@@ -52,6 +53,7 @@ const RED: u32 = 0xEF4444;
 const ICON_POWER: &str = "\u{e8ac}";
 const ICON_ADD: &str = "\u{e145}";
 const ICON_TEST: &str = "\u{e640}";
+const ICON_SHARE: &str = "\u{e80d}";
 const ICON_DELETE: &str = "\u{e872}";
 const ICON_SHIELD: &str = "\u{e32a}";
 const ICON_SETTINGS: &str = "\u{e8b8}";
@@ -270,6 +272,13 @@ impl App {
         self.vpn = Vpn::Connecting;
         self.detail.clear();
         platform::connect(config, self.t().vpn_is_on);
+    }
+
+    /// Copies the server's link to the clipboard and says so.
+    fn share(&mut self, index: usize, cx: &mut Cx) {
+        let Some(server) = self.servers.get(index) else { return };
+        platform::copy_text(&server.link);
+        cx.show_toast(self.shell, self.t().link_copied, 2000.0);
     }
 
     fn test(&mut self) {
@@ -668,8 +677,10 @@ fn server_menu(app: &App, index: usize) -> Build<SkiaShape> {
     if app.is_connected_to(index) {
         items.push(menu_item(ICON_POWER, t.disconnect, TEXT, |app, _index, cx| app.toggle(cx)));
         items.push(menu_item(ICON_TEST, t.test_connection, TEXT, |app, _index, _cx| app.test()));
+        items.push(menu_item(ICON_SHARE, t.share, TEXT, |app, index, cx| app.share(index, cx)));
     } else {
         items.push(menu_item(ICON_POWER, t.connect, TEXT, |app, index, cx| app.connect(index, cx)));
+        items.push(menu_item(ICON_SHARE, t.share, TEXT, |app, index, cx| app.share(index, cx)));
         items.push(menu_item(ICON_DELETE, t.delete, RED, |app, index, cx| {
             if let Some((_, card)) = app.menu_for {
                 app.menu_for = Some((index, card));
@@ -829,6 +840,13 @@ fn language_option(lang: Lang, name: &'static str) -> Build<SkiaShape> {
 
 pub fn run() {
     drawnui::run("VLESS", || {
+        // Toasts on the app's dark theme: the default near-black one would not show.
+        SkiaShell::set_defaults(ShellDefaults {
+            toast_background_color: rgb(SURFACE_HI),
+            toast_text_color: rgb(TEXT),
+            toast_text_font: "FontText".into(),
+            ..SkiaShell::defaults()
+        });
         let ui = Ui::new(App::load(), build)
             .font("FontText", "assets/fonts/OpenSans-Regular.ttf")
             .font_weight("FontText", "assets/fonts/OpenSans-Semibold.ttf", 600)
