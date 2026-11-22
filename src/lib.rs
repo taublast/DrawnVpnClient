@@ -126,6 +126,10 @@ struct App {
     testing: bool,
     /// The open server menu or delete question.
     popup: Option<PopupId>,
+    /// The link field of the "Add server" dialog, and whether its text is no vless:// link.
+    entry: Handle<SkiaEditor>,
+    entry_text: String,
+    entry_error: bool,
     /// The server the menu was opened for, and its card: the delete question opens there too.
     menu_for: Option<(usize, ControlId)>,
     lang: Lang,
@@ -279,6 +283,37 @@ impl App {
         self.notice.clear();
         cx.items_reset(self.list);
         self.save();
+    }
+
+    /// Import: the clipboard's links when it has new ones, else the dialog to paste or type one.
+    fn import_tapped(&mut self, cx: &mut Cx) {
+        let clipboard = platform::clipboard_text();
+        let new = clipboard
+            .split_whitespace()
+            .filter_map(|l| Server::parse(l).ok())
+            .any(|s| !self.servers.iter().any(|known| known.link == s.link));
+        if new {
+            self.import(&clipboard, cx);
+            return;
+        }
+        self.notice.clear();
+        self.entry_error = false;
+        self.entry_text.clear();
+        let options = PopupOptions { animated: true, close_when_background_tapped: true, show_overlay: true, background_color: None };
+        cx.open_popup(self.shell, entry_dialog(self), options);
+        // The field exists from the next frame on: the keyboard comes up there.
+        cx.postpone_before_draw::<App>(|app, cx| cx.focus(Some(app.entry.id())));
+    }
+
+    /// The dialog's Add: imports its link, or says it is none.
+    fn entry_add(&mut self, text: &str, cx: &mut Cx) {
+        if !text.split_whitespace().any(|l| Server::parse(l).is_ok()) {
+            self.entry_error = true;
+            return;
+        }
+        cx.focus(None::<ControlId>);
+        cx.close_popup(self.shell, true);
+        self.import(text, cx);
     }
 
     fn close_popup(&mut self, cx: &mut Cx) {
@@ -505,7 +540,7 @@ fn import_button() -> Build<SkiaShape> {
         .animation_tapped(SkiaTouchAnimation::Ripple)
         .accessibility_role(Aria::BUTTON)
         .observe(|me, app: &App| me.set_accessibility_label(app.t().import))
-        .on_tapped(|_me, app: &mut App, cx| app.import(&platform::clipboard_text(), cx))
+        .on_tapped(|_me, app: &mut App, cx| app.import_tapped(cx))
         .children(SkiaRow::new().spacing(6).padding((16, 0, 20, 0)).vertical_options(LayoutOptions::Center).children((
             SkiaLabel::new(ICON_ADD)
                 .font_family("FontIcons")
@@ -521,6 +556,96 @@ fn import_button() -> Build<SkiaShape> {
                 .accessibility_role(Aria::PRESENTATION)
                 .observe(|me, app: &App| me.set_text(app.t().import)),
         )))
+}
+
+/// "Add server": a field for a vless:// link, Cancel and Add. Near the top: the keyboard takes the bottom.
+fn entry_dialog(app: &mut App) -> Build<SkiaLayout> {
+    let t = app.t();
+    let button = |text: &'static str, color: u32, add: bool| {
+        SkiaShape::new()
+            .corner_radius(10)
+            .height_request(44)
+            .fill_x()
+            .background_color(rgb(color))
+            .animation_tapped(SkiaTouchAnimation::Ripple)
+            .accessibility_role(Aria::BUTTON)
+            .accessibility_label(text)
+            .on_tapped(move |_me, app: &mut App, cx| {
+                if add {
+                    let text = app.entry_text.clone();
+                    app.entry_add(&text, cx);
+                } else {
+                    cx.focus(None::<ControlId>);
+                    cx.close_popup(app.shell, true);
+                }
+            })
+            .children(
+                SkiaLabel::new(text)
+                    .font_family("FontTextBold")
+                    .font_size(15)
+                    .text_color(rgb(TEXT))
+                    .center()
+                    .accessibility_role(Aria::PRESENTATION),
+            )
+    };
+    // A full-page layer: the panel sits near the top (the keyboard takes the bottom), a tap
+    // beside it closes the dialog.
+    let close = |_me: &mut Mut<'_, SkiaLayout>, app: &mut App, cx: &mut Cx| {
+        cx.focus(None::<ControlId>);
+        cx.close_popup(app.shell, true);
+    };
+    SkiaLayer::new().fill().children((
+        SkiaLayer::new().fill().on_tapped(close),
+        SkiaShape::new()
+        .corner_radius(16)
+        .fill_x()
+        .margin((20, 64, 20, 0))
+        .vertical_options(LayoutOptions::Start)
+        .background_color(rgb(SURFACE_HI))
+        .stroke_color(rgb(LINE))
+        .stroke_width(1)
+        .accessibility_modal(true)
+        .accessibility_label(t.add_server)
+        .children(SkiaStack::new().fill_x().padding(20).spacing(14).children((
+            SkiaLabel::new(t.add_server).font_family("FontTextBold").font_size(18).text_color(rgb(TEXT)).accessibility_role(Aria::HEADING),
+            SkiaEditor::new()
+                .fill_x()
+                .font_size(14)
+                .text_color(rgb(TEXT))
+                .placeholder_text(t.link_placeholder)
+                .placeholder_color(rgb(MUTED))
+                .max_lines(10)
+                .auto_height(true)
+                .return_type(ReturnType::Done)
+                .corner_radius(10)
+                .stroke_color(rgb(LINE))
+                .stroke_width(1)
+                .background_color(rgb(SURFACE))
+                .padding((12, 10))
+                .accessibility_label(t.link_placeholder)
+                .assign(&mut app.entry)
+                .on_text_changed(|_me, app: &mut App, _cx, text| {
+                    app.entry_text = text.to_owned();
+                    app.entry_error = false;
+                })
+                .on_text_submitted(|_me, app: &mut App, cx, text| app.entry_add(text, cx)),
+            SkiaLabel::new("")
+                .font_size(13)
+                .text_color(rgb(RED))
+                .fill_x()
+                .accessibility_live("polite")
+                .observe(|me, app: &App| {
+                    me.set_text(app.t().not_a_link);
+                    me.set_is_visible(app.entry_error);
+                }),
+            SkiaGrid::new()
+                .column_definitions("*,*")
+                .column_spacing(10)
+                .children((button(t.cancel, SURFACE, false).column(0), button(t.add, ACCENT, true).column(1))),
+        )))
+        // Taps on the panel stay in the panel.
+        .on_tapped(|_me, _app: &mut App, _cx| {}),
+    ))
 }
 
 // ---------------------------------------------------------------- server menu
