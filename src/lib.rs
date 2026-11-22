@@ -1,5 +1,5 @@
 //! VLESS: a VPN client for VLESS + XTLS Vision + REALITY servers. The UI is DrawnUI for Rust; on
-//! Android the tunnel is the system VPN (XrayVpnService, Java) running Xray-core.
+//! Android the tunnel is the system VPN (ConnectionService, Java) running Xray-core.
 
 mod link;
 mod texts;
@@ -67,8 +67,12 @@ const ROUTE_SETTINGS: &str = "settings";
 
 /// GitHub's latest release of this app, asked at start and at most once a day.
 const LATEST_RELEASE: &str = "https://api.github.com/repos/taublast/DrawnVpnClient/releases/latest";
-/// The release file for this build, short to type and share: drawnvpn-010-arm64.apk for 0.1.0.
+/// The release file for this build's phones, short to type and share: netconnect-010-arm64.apk and
+/// netconnect-010-armv7.apk for 0.1.0.
+#[cfg(not(target_arch = "arm"))]
 const RELEASE_ASSET: &str = "-arm64.apk";
+#[cfg(target_arch = "arm")]
+const RELEASE_ASSET: &str = "-armv7.apk";
 const UPDATE_CHECK_EVERY: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
 
 fn rgb(v: u32) -> Color {
@@ -78,7 +82,6 @@ fn rgb(v: u32) -> Color {
 /// What the Java side reports (MainActivity.nativeEvent).
 pub enum Event {
     State(i32, String),
-    Link(String),
     /// The answer of `platform::fetch`, "" when it failed.
     Fetched(String),
 }
@@ -200,7 +203,7 @@ impl App {
         }
     }
 
-    fn on_event(&mut self, event: Event, cx: &mut Cx) {
+    fn on_event(&mut self, event: Event, _cx: &mut Cx) {
         match event {
             Event::State(code, text) => {
                 self.vpn = Vpn::from_code(code);
@@ -209,7 +212,6 @@ impl App {
                 // Sent at start and whenever the app comes back to the screen.
                 self.check_for_updates();
             }
-            Event::Link(text) => self.import(&text, cx),
             Event::Fetched(json) => self.update = update::newer(&json, env!("CARGO_PKG_VERSION"), RELEASE_ASSET),
         }
     }
@@ -442,7 +444,7 @@ fn header() -> Build<SkiaLayout> {
     SkiaLayer::new().fill_x().padding((0, 8, 0, 0)).children((
         SkiaRow::new().spacing(8).vertical_options(LayoutOptions::Center).children((
             SkiaLabel::new(ICON_SHIELD).font_family("FontIcons").font_size(22).text_color(rgb(ACCENT)).vertical_options(LayoutOptions::Center),
-            SkiaLabel::new("VLESS")
+            SkiaLabel::new("Net Connect")
                 .font_family("FontTextBold")
                 .font_size(20)
                 .text_color(rgb(TEXT))
@@ -980,7 +982,7 @@ fn language_option(lang: Lang, name: &'static str) -> Build<SkiaShape> {
 }
 
 pub fn run() {
-    drawnui::run("VLESS", || {
+    drawnui::run("Net Connect", || {
         // Toasts on the app's dark theme: the default near-black one would not show.
         SkiaShell::set_defaults(ShellDefaults {
             toast_background_color: rgb(SURFACE_HI),

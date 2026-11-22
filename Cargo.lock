@@ -719,6 +719,16 @@ version = "0.1.1"
 source = "git+https://github.com/DrawnUi/winit?rev=fd3685990f74fb3e8917ee56f3a33690b9471d16#fd3685990f74fb3e8917ee56f3a33690b9471d16"
 
 [[package]]
+name = "drawnnetc"
+version = "0.1.0"
+dependencies = [
+ "drawnui",
+ "embed-resource",
+ "jni 0.21.1",
+ "serde_json",
+]
+
+[[package]]
 name = "drawnui"
 version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -779,16 +789,6 @@ dependencies = [
  "drawnui-skia-bindings",
  "percent-encoding",
  "skia-svg-macros",
-]
-
-[[package]]
-name = "drawnvless"
-version = "0.1.0"
-dependencies = [
- "drawnui",
- "embed-resource",
- "jni 0.21.1",
- "serde_json",
 ]
 
 [[package]]

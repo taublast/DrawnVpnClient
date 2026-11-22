@@ -1,5 +1,5 @@
 # Called by name from Rust (src/android.rs) and from native code.
--keep class com.appomobi.drawnvpn.MainActivity {
+-keep class com.appomobi.drawnnetc.MainActivity {
     public void vpnConnect(java.lang.String, java.lang.String);
     public void vpnDisconnect();
     public void vpnTest();

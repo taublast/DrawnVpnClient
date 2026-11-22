@@ -1,4 +1,4 @@
-package com.appomobi.drawnvpn;
+package com.appomobi.drawnnetc;
 
 import android.app.Notification;
 import android.app.NotificationChannel;
@@ -20,10 +20,10 @@ import libv2ray.Libv2ray;
  * inbound on the interface's fd). The app itself is left out of the VPN, so Xray's connections to
  * the server go out over the real network.
  */
-public class XrayVpnService extends VpnService implements CoreCallbackHandler {
-    static final String ACTION_START = "com.appomobi.drawnvpn.START";
-    static final String ACTION_STOP = "com.appomobi.drawnvpn.STOP";
-    static final String ACTION_TEST = "com.appomobi.drawnvpn.TEST";
+public class ConnectionService extends VpnService implements CoreCallbackHandler {
+    static final String ACTION_START = "com.appomobi.drawnnetc.START";
+    static final String ACTION_STOP = "com.appomobi.drawnnetc.STOP";
+    static final String ACTION_TEST = "com.appomobi.drawnnetc.TEST";
     static final String EXTRA_CONFIG = "config";
     static final String EXTRA_NOTIFICATION = "notification";
 
@@ -37,7 +37,7 @@ public class XrayVpnService extends VpnService implements CoreCallbackHandler {
     static volatile int state = STATE_OFF;
     static volatile String message = "";
 
-    private static final String TAG = "DrawnVless";
+    private static final String TAG = "NetConnect";
     private static final String CHANNEL = "vpn";
     private static final int NOTIFICATION = 1;
     /** Answers 204 with no body: a cheap check that traffic really passes the server. */
@@ -76,7 +76,7 @@ public class XrayVpnService extends VpnService implements CoreCallbackHandler {
             stopCore();
             try {
                 Builder builder = new Builder()
-                        .setSession("VLESS")
+                        .setSession("Net Connect")
                         .setMtu(1500)
                         .addAddress("10.10.14.1", 30)
                         .addRoute("0.0.0.0", 0)
@@ -167,7 +167,7 @@ public class XrayVpnService extends VpnService implements CoreCallbackHandler {
                 PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         Notification notification = new Notification.Builder(this, CHANNEL)
                 .setSmallIcon(android.R.drawable.ic_lock_lock)
-                .setContentTitle("VLESS")
+                .setContentTitle("Net Connect")
                 .setContentText(text == null ? "VPN" : text)
                 .setContentIntent(open)
                 .setOngoing(true)

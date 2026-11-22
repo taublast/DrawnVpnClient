@@ -1,4 +1,4 @@
-//! The Java side (MainActivity, XrayVpnService) through JNI: calls into the activity, and the
+//! The Java side (MainActivity, ConnectionService) through JNI: calls into the activity, and the
 //! events it sends back (`nativeEvent`), queued for the UI thread.
 
 use std::sync::Mutex;
@@ -15,8 +15,7 @@ static APP: Mutex<Option<AndroidApp>> = Mutex::new(None);
 static EVENTS: Mutex<Vec<Event>> = Mutex::new(Vec::new());
 static WAKE: Mutex<Option<(drawnui::Waker, ControlId)>> = Mutex::new(None);
 
-/// MainActivity.EVENT_LINK / EVENT_FETCHED; 0..4 are VPN states.
-const EVENT_LINK: jint = 10;
+/// MainActivity.EVENT_FETCHED; 0..4 are VPN states.
 const EVENT_FETCHED: jint = 11;
 
 pub fn set_app(app: AndroidApp) {
@@ -128,7 +127,7 @@ pub fn core_version() -> String {
 
 /// MainActivity.nativeEvent: any thread (the service's, the activity's).
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_appomobi_drawnvpn_MainActivity_nativeEvent<'l>(
+pub extern "system" fn Java_com_appomobi_drawnnetc_MainActivity_nativeEvent<'l>(
     mut env: JNIEnv<'l>,
     _class: JClass<'l>,
     kind: jint,
@@ -136,7 +135,6 @@ pub extern "system" fn Java_com_appomobi_drawnvpn_MainActivity_nativeEvent<'l>(
 ) {
     let text: String = env.get_string(&text).map(Into::into).unwrap_or_default();
     let event = match kind {
-        EVENT_LINK => Event::Link(text),
         EVENT_FETCHED => Event::Fetched(text),
         _ => Event::State(kind, text),
     };

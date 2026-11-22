@@ -1,4 +1,4 @@
-package com.appomobi.drawnvpn;
+package com.appomobi.drawnnetc;
 
 import android.content.ClipData;
 import android.content.ClipboardManager;
@@ -14,8 +14,7 @@ import com.google.androidgamesdk.GameActivity;
 public class MainActivity extends GameActivity {
     private static final int REQUEST_VPN = 1;
 
-    // Event kinds sent to the Rust side (nativeEvent). 0..4 are the VPN states of XrayVpnService.
-    static final int EVENT_LINK = 10;
+    // Event kinds sent to the Rust side (nativeEvent). 0..4 are the VPN states of ConnectionService.
     static final int EVENT_FETCHED = 11;
 
     private String pendingConfig;
@@ -35,30 +34,14 @@ public class MainActivity extends GameActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState); // loads libdrawnvless.so
-        deliverLink(getIntent());
-    }
-
-    @Override
-    protected void onNewIntent(Intent intent) {
-        super.onNewIntent(intent);
-        setIntent(intent);
-        deliverLink(intent);
+        super.onCreate(savedInstanceState); // loads libdrawnnetc.so
     }
 
     @Override
     protected void onResume() {
         super.onResume();
         // The service may have changed state while the app was away.
-        emit(XrayVpnService.state, XrayVpnService.message);
-    }
-
-    private void deliverLink(Intent intent) {
-        Uri data = intent == null ? null : intent.getData();
-        if (data != null && "vless".equalsIgnoreCase(data.getScheme())) {
-            emit(EVENT_LINK, data.toString());
-            intent.setData(null);
-        }
+        emit(ConnectionService.state, ConnectionService.message);
     }
 
     /** Starts the VPN with an Xray config; asks the system for the VPN permission the first time. */
@@ -86,12 +69,12 @@ public class MainActivity extends GameActivity {
     }
 
     public void vpnDisconnect() {
-        runOnUiThread(() -> startService(new Intent(this, XrayVpnService.class).setAction(XrayVpnService.ACTION_STOP)));
+        runOnUiThread(() -> startService(new Intent(this, ConnectionService.class).setAction(ConnectionService.ACTION_STOP)));
     }
 
     /** A test request through the running tunnel; the service reports the result as its state. */
     public void vpnTest() {
-        runOnUiThread(() -> startService(new Intent(this, XrayVpnService.class).setAction(XrayVpnService.ACTION_TEST)));
+        runOnUiThread(() -> startService(new Intent(this, ConnectionService.class).setAction(ConnectionService.ACTION_TEST)));
     }
 
     /** The clipboard's text, or "" (Android lets only the focused app read it). */
@@ -146,7 +129,7 @@ public class MainActivity extends GameActivity {
     public void copyText(final String text) {
         runOnUiThread(() -> {
             ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
-            if (clipboard != null) clipboard.setPrimaryClip(ClipData.newPlainText("vless", text));
+            if (clipboard != null) clipboard.setPrimaryClip(ClipData.newPlainText("link", text));
         });
     }
 
@@ -159,19 +142,19 @@ public class MainActivity extends GameActivity {
         } else {
             // The Rust side shows its own text for "permission". Kept as the service's state too:
             // onResume, which runs right after this, sends that state again.
-            XrayVpnService.state = XrayVpnService.STATE_ERROR;
-            XrayVpnService.message = "permission";
-            emit(XrayVpnService.STATE_ERROR, "permission");
+            ConnectionService.state = ConnectionService.STATE_ERROR;
+            ConnectionService.message = "permission";
+            emit(ConnectionService.STATE_ERROR, "permission");
         }
         pendingConfig = null;
         pendingNotification = null;
     }
 
     private void startVpn(String config, String notification) {
-        Intent intent = new Intent(this, XrayVpnService.class)
-                .setAction(XrayVpnService.ACTION_START)
-                .putExtra(XrayVpnService.EXTRA_CONFIG, config)
-                .putExtra(XrayVpnService.EXTRA_NOTIFICATION, notification);
+        Intent intent = new Intent(this, ConnectionService.class)
+                .setAction(ConnectionService.ACTION_START)
+                .putExtra(ConnectionService.EXTRA_CONFIG, config)
+                .putExtra(ConnectionService.EXTRA_NOTIFICATION, notification);
         if (Build.VERSION.SDK_INT >= 26) startForegroundService(intent);
         else startService(intent);
     }

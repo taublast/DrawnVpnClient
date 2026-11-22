@@ -11,4 +11,4 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = 'drawnvless'
+rootProject.name = 'drawnnetc'
