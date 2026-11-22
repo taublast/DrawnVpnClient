@@ -96,7 +96,7 @@ public class MainActivity extends GameActivity {
                 connection = (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
                 connection.setConnectTimeout(20000);
                 connection.setReadTimeout(20000);
-                connection.setRequestProperty("User-Agent", "DrawnVpnClient");
+                connection.setRequestProperty("User-Agent", "NetConnect");
                 connection.setRequestProperty("Accept", "application/vnd.github+json");
                 if (connection.getResponseCode() == 200) {
                     // A read loop: InputStream.readAllBytes needs Android 13.

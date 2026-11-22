@@ -65,8 +65,8 @@ const ICON_CHECK: &str = "\u{e5ca}";
 
 const ROUTE_SETTINGS: &str = "settings";
 
-/// GitHub's latest release of this app, asked at start and at most once a day.
-const LATEST_RELEASE: &str = "https://api.github.com/repos/taublast/DrawnVpnClient/releases/latest";
+/// This repository's releases (all platforms), asked at start and at most once a day.
+const RELEASES: &str = "https://api.github.com/repos/taublast/DrawnVpnClient/releases?per_page=20";
 /// The release file for this build's phones, short to type and share: netconnect-010-arm64.apk and
 /// netconnect-010-armv7.apk for 0.1.0.
 #[cfg(not(target_arch = "arm"))]
@@ -373,7 +373,7 @@ impl App {
     fn check_for_updates(&mut self) {
         if self.check_updates && self.last_update_check.is_none_or(|t| t.elapsed() >= UPDATE_CHECK_EVERY) {
             self.last_update_check = Some(std::time::Instant::now());
-            platform::fetch(LATEST_RELEASE);
+            platform::fetch(RELEASES);
         }
     }
 

@@ -15,8 +15,8 @@ android {
         applicationId 'com.appomobi.drawnnetc'
         minSdk 26
         targetSdk 36
-        versionCode 1
-        versionName '0.1.0'
+        versionCode 2
+        versionName '0.1.1'
         // Only the ABIs this build is for (-Pabis=arm64-v8a,armeabi-v7a; android.ps1 passes it):
         // the AAR carries Go libraries for every ABI, about 33 MB each.
         ndk { abiFilters(*((project.findProperty('abis') ?: 'arm64-v8a').toString().split(','))) }

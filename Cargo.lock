@@ -720,7 +720,7 @@ source = "git+https://github.com/DrawnUi/winit?rev=fd3685990f74fb3e8917ee56f3a33
 
 [[package]]
 name = "drawnnetc"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "drawnui",
  "embed-resource",
