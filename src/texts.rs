@@ -78,6 +78,11 @@ pub struct Texts {
     pub language: &'static str,
     pub system_language: &'static str,
     pub about: &'static str,
+    pub updates: &'static str,
+    pub check_updates: &'static str,
+    pub update_available: &'static str,
+    pub download: &'static str,
+    pub later: &'static str,
     pub version: &'static str,
 }
 
@@ -129,6 +134,11 @@ pub static EN: Texts = Texts {
     language: "LANGUAGE",
     system_language: "Phone language",
     about: "ABOUT",
+    updates: "UPDATES",
+    check_updates: "Check for updates",
+    update_available: "VLESS {} is available",
+    download: "Download",
+    later: "Later",
     version: "Version",
 };
 
@@ -173,5 +183,10 @@ pub static RU: Texts = Texts {
     language: "ЯЗЫК",
     system_language: "Язык телефона",
     about: "О ПРИЛОЖЕНИИ",
+    updates: "ОБНОВЛЕНИЯ",
+    check_updates: "Проверять обновления",
+    update_available: "Доступна версия VLESS {}",
+    download: "Скачать",
+    later: "Позже",
     version: "Версия",
 };

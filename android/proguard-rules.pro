@@ -1,10 +1,12 @@
 # Called by name from Rust (src/android.rs) and from native code.
--keep class com.appomobi.drawnvless.MainActivity {
+-keep class com.appomobi.drawnvpn.MainActivity {
     public void vpnConnect(java.lang.String, java.lang.String);
     public void vpnDisconnect();
     public void vpnTest();
     public java.lang.String clipboardText();
     public void copyText(java.lang.String);
+    public void fetchText(java.lang.String);
+    public void openUrl(java.lang.String);
     public java.lang.String systemLanguage();
     public java.lang.String coreVersion();
     native <methods>;

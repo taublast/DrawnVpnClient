@@ -1,4 +1,4 @@
-package com.appomobi.drawnvless;
+package com.appomobi.drawnvpn;
 
 import android.app.Notification;
 import android.app.NotificationChannel;
@@ -21,9 +21,9 @@ import libv2ray.Libv2ray;
  * the server go out over the real network.
  */
 public class XrayVpnService extends VpnService implements CoreCallbackHandler {
-    static final String ACTION_START = "com.appomobi.drawnvless.START";
-    static final String ACTION_STOP = "com.appomobi.drawnvless.STOP";
-    static final String ACTION_TEST = "com.appomobi.drawnvless.TEST";
+    static final String ACTION_START = "com.appomobi.drawnvpn.START";
+    static final String ACTION_STOP = "com.appomobi.drawnvpn.STOP";
+    static final String ACTION_TEST = "com.appomobi.drawnvpn.TEST";
     static final String EXTRA_CONFIG = "config";
     static final String EXTRA_NOTIFICATION = "notification";
 

@@ -15,8 +15,9 @@ static APP: Mutex<Option<AndroidApp>> = Mutex::new(None);
 static EVENTS: Mutex<Vec<Event>> = Mutex::new(Vec::new());
 static WAKE: Mutex<Option<(drawnui::Waker, ControlId)>> = Mutex::new(None);
 
-/// MainActivity.EVENT_LINK; 0..4 are VPN states.
+/// MainActivity.EVENT_LINK / EVENT_FETCHED; 0..4 are VPN states.
 const EVENT_LINK: jint = 10;
+const EVENT_FETCHED: jint = 11;
 
 pub fn set_app(app: AndroidApp) {
     *APP.lock().unwrap_or_else(|e| e.into_inner()) = Some(app);
@@ -78,6 +79,22 @@ pub fn test() {
     with_activity(|env, activity| env.call_method(activity, "vpnTest", "()V", &[]).map(|_| ()));
 }
 
+/// Downloads `url` as text on a Java thread; the answer comes back as `Event::Fetched`.
+pub fn fetch(url: &str) {
+    with_activity(|env, activity| {
+        let url = env.new_string(url)?;
+        env.call_method(activity, "fetchText", "(Ljava/lang/String;)V", &[JValue::Object(&url)]).map(|_| ())
+    });
+}
+
+/// Opens `url` in the browser (an APK there downloads, then the system installs it).
+pub fn open_url(url: &str) {
+    with_activity(|env, activity| {
+        let url = env.new_string(url)?;
+        env.call_method(activity, "openUrl", "(Ljava/lang/String;)V", &[JValue::Object(&url)]).map(|_| ())
+    });
+}
+
 /// Puts `text` on the clipboard.
 pub fn copy_text(text: &str) {
     with_activity(|env, activity| {
@@ -111,14 +128,18 @@ pub fn core_version() -> String {
 
 /// MainActivity.nativeEvent: any thread (the service's, the activity's).
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_appomobi_drawnvless_MainActivity_nativeEvent<'l>(
+pub extern "system" fn Java_com_appomobi_drawnvpn_MainActivity_nativeEvent<'l>(
     mut env: JNIEnv<'l>,
     _class: JClass<'l>,
     kind: jint,
     text: JString<'l>,
 ) {
     let text: String = env.get_string(&text).map(Into::into).unwrap_or_default();
-    let event = if kind == EVENT_LINK { Event::Link(text) } else { Event::State(kind, text) };
+    let event = match kind {
+        EVENT_LINK => Event::Link(text),
+        EVENT_FETCHED => Event::Fetched(text),
+        _ => Event::State(kind, text),
+    };
     EVENTS.lock().unwrap_or_else(|e| e.into_inner()).push(event);
     if let Some((waker, id)) = WAKE.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
         waker.invalidate(*id, Dirty::APPLY);

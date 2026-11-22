@@ -9,14 +9,14 @@ def root = file('..')
 layout.buildDirectory = new File(root, 'target/android/gradle')
 
 android {
-    namespace 'com.appomobi.drawnvless'
+    namespace 'com.appomobi.drawnvpn'
     compileSdk 36
     defaultConfig {
-        applicationId 'com.appomobi.drawnvless'
+        applicationId 'com.appomobi.drawnvpn'
         minSdk 26
         targetSdk 36
         versionCode 1
-        versionName '0.1'
+        versionName '0.1.0'
         // Phones only: the AAR also carries armv7 / x86 / x86_64 Go libraries (about 33 MB each).
         ndk { abiFilters 'arm64-v8a' }
     }

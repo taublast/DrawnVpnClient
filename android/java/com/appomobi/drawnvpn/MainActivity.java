@@ -1,4 +1,4 @@
-package com.appomobi.drawnvless;
+package com.appomobi.drawnvpn;
 
 import android.content.ClipData;
 import android.content.ClipboardManager;
@@ -16,6 +16,7 @@ public class MainActivity extends GameActivity {
 
     // Event kinds sent to the Rust side (nativeEvent). 0..4 are the VPN states of XrayVpnService.
     static final int EVENT_LINK = 10;
+    static final int EVENT_FETCHED = 11;
 
     private String pendingConfig;
     private String pendingNotification;
@@ -101,6 +102,44 @@ public class MainActivity extends GameActivity {
         if (clip == null || clip.getItemCount() == 0) return "";
         CharSequence text = clip.getItemAt(0).coerceToText(this);
         return text == null ? "" : text.toString();
+    }
+
+    /** Downloads a URL as text on a thread of its own; the answer (or "") comes as EVENT_FETCHED. */
+    public void fetchText(final String url) {
+        new Thread(() -> {
+            String body = "";
+            java.net.HttpURLConnection connection = null;
+            try {
+                connection = (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
+                connection.setConnectTimeout(20000);
+                connection.setReadTimeout(20000);
+                connection.setRequestProperty("User-Agent", "DrawnVpnClient");
+                connection.setRequestProperty("Accept", "application/vnd.github+json");
+                if (connection.getResponseCode() == 200) {
+                    // A read loop: InputStream.readAllBytes needs Android 13.
+                    try (java.io.InputStream in = connection.getInputStream()) {
+                        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+                        byte[] buffer = new byte[16384];
+                        for (int n; (n = in.read(buffer)) > 0; ) out.write(buffer, 0, n);
+                        body = out.toString("UTF-8");
+                    }
+                }
+            } catch (Throwable ignored) {
+            } finally {
+                if (connection != null) connection.disconnect();
+            }
+            emit(EVENT_FETCHED, body);
+        }).start();
+    }
+
+    /** Opens a URL in the browser. */
+    public void openUrl(final String url) {
+        runOnUiThread(() -> {
+            try {
+                startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+            } catch (Exception ignored) {
+            }
+        });
     }
 
     /** Puts text on the clipboard. */

@@ -9,7 +9,7 @@ param(
     [ValidateSet("arm64-v8a", "armeabi-v7a", "x86_64", "x86", "all")]
     [string]$Abi = "arm64-v8a",
     [switch]$Install,
-    # Also the Google Play bundle: targetndroid\drawnvless.aab
+    # Also the Google Play bundle: target\android\drawnvless.aab
     [switch]$Bundle
 )
 $ErrorActionPreference = "Stop"
@@ -53,7 +53,7 @@ try {
     if ($Install) {
         adb install -r target\android\drawnvless.apk
         if ($LASTEXITCODE) { throw "adb install failed" }
-        adb shell am start -n com.appomobi.drawnvless/.MainActivity
+        adb shell am start -n com.appomobi.drawnvpn/.MainActivity
     }
 }
 finally {

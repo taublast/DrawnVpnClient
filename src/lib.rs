@@ -3,6 +3,7 @@
 
 mod link;
 mod texts;
+mod update;
 #[cfg(target_os = "android")]
 mod android;
 #[cfg(target_os = "android")]
@@ -19,6 +20,8 @@ mod platform {
     pub fn disconnect() {}
     pub fn test() {}
     pub fn copy_text(_text: &str) {}
+    pub fn fetch(_url: &str) {}
+    pub fn open_url(_url: &str) {}
     pub fn clipboard_text() -> String {
         String::new()
     }
@@ -62,6 +65,12 @@ const ICON_CHECK: &str = "\u{e5ca}";
 
 const ROUTE_SETTINGS: &str = "settings";
 
+/// GitHub's latest release of this app, asked at start and at most once a day.
+const LATEST_RELEASE: &str = "https://api.github.com/repos/taublast/DrawnVpnClient/releases/latest";
+/// The release file for this build: drawnvless-<version>-android-arm64.apk.
+const RELEASE_ASSET: &str = "-android-arm64.apk";
+const UPDATE_CHECK_EVERY: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+
 fn rgb(v: u32) -> Color {
     Color::new(0xFF00_0000 | v)
 }
@@ -70,6 +79,8 @@ fn rgb(v: u32) -> Color {
 pub enum Event {
     State(i32, String),
     Link(String),
+    /// The answer of `platform::fetch`, "" when it failed.
+    Fetched(String),
 }
 
 #[derive(Clone, Copy, PartialEq, Default)]
@@ -135,6 +146,12 @@ struct App {
     /// The server the menu was opened for, and its card: the delete question opens there too.
     menu_for: Option<(usize, ControlId)>,
     lang: Lang,
+    /// A newer release on GitHub, the version the user put off with Later, the setting, and when
+    /// GitHub was last asked.
+    update: Option<update::Update>,
+    skipped_update: String,
+    check_updates: bool,
+    last_update_check: Option<std::time::Instant>,
     /// The phone's language code.
     system_lang: String,
     core_version: String,
@@ -149,7 +166,7 @@ impl App {
     }
 
     fn load() -> App {
-        let mut app = App { system_lang: platform::system_language(), ..App::default() };
+        let mut app = App { system_lang: platform::system_language(), check_updates: true, ..App::default() };
         let Some(dir) = platform::data_dir() else { return app };
         if let Ok(text) = std::fs::read_to_string(dir.join("servers.txt")) {
             let mut lines = text.lines();
@@ -157,8 +174,14 @@ impl App {
             app.servers = lines.filter_map(|l| Server::parse(l).ok()).collect();
             app.selected = selected.min(app.servers.len().saturating_sub(1));
         }
-        if let Ok(code) = std::fs::read_to_string(dir.join("language.txt")) {
-            app.lang = Lang::from_code(code.trim());
+        // settings.txt: key=value lines.
+        for line in std::fs::read_to_string(dir.join("settings.txt")).unwrap_or_default().lines() {
+            match line.split_once('=') {
+                Some(("lang", v)) => app.lang = Lang::from_code(v.trim()),
+                Some(("updates", v)) => app.check_updates = v.trim() != "0",
+                Some(("skip", v)) => app.skipped_update = v.trim().to_owned(),
+                _ => {}
+            }
         }
         app
     }
@@ -170,7 +193,8 @@ impl App {
             text.push_str(&s.link);
             text.push('\n');
         }
-        let saved = std::fs::write(dir.join("servers.txt"), text).and_then(|_| std::fs::write(dir.join("language.txt"), self.lang.code()));
+        let settings = format!("lang={}\nupdates={}\nskip={}\n", self.lang.code(), u8::from(self.check_updates), self.skipped_update);
+        let saved = std::fs::write(dir.join("servers.txt"), text).and_then(|_| std::fs::write(dir.join("settings.txt"), settings));
         if let Err(e) = saved {
             eprintln!("save failed: {e}");
         }
@@ -182,8 +206,11 @@ impl App {
                 self.vpn = Vpn::from_code(code);
                 self.detail = text;
                 self.testing = false;
+                // Sent at start and whenever the app comes back to the screen.
+                self.check_for_updates();
             }
             Event::Link(text) => self.import(&text, cx),
+            Event::Fetched(json) => self.update = update::newer(&json, env!("CARGO_PKG_VERSION"), RELEASE_ASSET),
         }
     }
 
@@ -340,6 +367,19 @@ impl App {
         self.import(text, cx);
     }
 
+    /// Asks GitHub for the latest release, at most once a day while the setting is on.
+    fn check_for_updates(&mut self) {
+        if self.check_updates && self.last_update_check.is_none_or(|t| t.elapsed() >= UPDATE_CHECK_EVERY) {
+            self.last_update_check = Some(std::time::Instant::now());
+            platform::fetch(LATEST_RELEASE);
+        }
+    }
+
+    /// The update to show: not the version put off with Later.
+    fn offered(&self) -> Option<&update::Update> {
+        self.update.as_ref().filter(|u| self.check_updates && u.version != self.skipped_update)
+    }
+
     fn close_popup(&mut self, cx: &mut Cx) {
         if let Some(popup) = self.popup.take() {
             cx.close_popup_window(popup);
@@ -379,11 +419,11 @@ fn build(app: &mut App) -> Build<SkiaLayout> {
 fn main_page(app: &mut App) -> Build<SkiaLayout> {
     SkiaGrid::new()
         .fill()
-        .row_definitions("Auto,Auto,Auto,*,Auto")
+        .row_definitions("Auto,Auto,Auto,Auto,*,Auto")
         .column_definitions("*")
         .padding((20, 12, 20, 16))
         .row_spacing(0)
-        .children((header().row(0), power_button().row(1), status().row(2), servers(app).row(3), actions().row(4)))
+        .children((header().row(0), update_banner().row(1), power_button().row(2), status().row(3), servers(app).row(4), actions().row(5)))
 }
 
 /// A round icon button for headers (settings, back).
@@ -415,6 +455,63 @@ fn header() -> Build<SkiaLayout> {
             .observe(|me, app: &App| me.set_accessibility_label(app.t().settings))
             .on_tapped(|_me, app: &mut App, cx| cx.go_to(app.shell, ROUTE_SETTINGS, true)),
     ))
+}
+
+/// A newer release on GitHub: Download opens its APK in the browser, Later hides this version.
+fn update_banner() -> Build<SkiaShape> {
+    let button = |text: fn(&Texts) -> &'static str, color: u32, download: bool| {
+        SkiaShape::new()
+            .corner_radius(10)
+            .height_request(38)
+            .fill_x()
+            .background_color(rgb(color))
+            .animation_tapped(SkiaTouchAnimation::Ripple)
+            .accessibility_role(Aria::BUTTON)
+            .observe(move |me, app: &App| me.set_accessibility_label(text(app.t())))
+            .on_tapped(move |_me, app: &mut App, _cx| {
+                let Some(update) = app.offered().cloned() else { return };
+                if download {
+                    platform::open_url(&update.url);
+                } else {
+                    app.skipped_update = update.version;
+                    app.save();
+                }
+            })
+            .children(
+                SkiaLabel::new("")
+                    .font_family("FontTextBold")
+                    .font_size(14)
+                    .text_color(rgb(TEXT))
+                    .center()
+                    .accessibility_role(Aria::PRESENTATION)
+                    .observe(move |me, app: &App| me.set_text(text(app.t()))),
+            )
+    };
+    SkiaShape::new()
+        .corner_radius(14)
+        .fill_x()
+        .margin((0, 16, 0, 0))
+        .background_color(rgb(SURFACE_HI))
+        .stroke_color(rgb(ACCENT))
+        .stroke_width(1)
+        .accessibility_role(Aria::REGION)
+        .observe(|me, app: &App| me.set_is_visible(app.offered().is_some()))
+        .children(SkiaStack::new().fill_x().padding((16, 12)).spacing(10).children((
+            SkiaLabel::new("")
+                .font_size(15)
+                .text_color(rgb(TEXT))
+                .fill_x()
+                .accessibility_live("polite")
+                .observe(|me, app: &App| {
+                    if let Some(update) = app.offered() {
+                        me.set_text(Texts::fill(app.t().update_available, &update.version));
+                    }
+                }),
+            SkiaGrid::new()
+                .column_definitions("*,*")
+                .column_spacing(10)
+                .children((button(|t| t.download, ACCENT, true).column(0), button(|t| t.later, SURFACE, false).column(1))),
+        )))
 }
 
 /// The big round button: gray off, amber connecting, green on.
@@ -809,6 +906,35 @@ fn settings_page(app: &mut App) -> Build<SkiaLayout> {
             .spacing(8)
             .accessibility_role(Aria::RADIO_GROUP)
             .children(LANGUAGES.into_iter().map(|(lang, name)| language_option(lang, name)).collect::<Vec<_>>()),
+        section_title().margin((0, 16, 0, 0)).observe(|me, app: &App| me.set_text(app.t().updates)),
+        SkiaShape::new()
+            .corner_radius(14)
+            .fill_x()
+            .background_color(rgb(SURFACE))
+            .stroke_color(rgb(LINE))
+            .stroke_width(2)
+            .children(SkiaLayer::new().fill_x().padding((16, 10)).children((
+                SkiaLabel::new("")
+                    .font_size(16)
+                    .text_color(rgb(TEXT))
+                    .vertical_options(LayoutOptions::Center)
+                    .margin((0, 0, 64, 0))
+                    .accessibility_role(Aria::PRESENTATION)
+                    .observe(|me, app: &App| me.set_text(app.t().check_updates)),
+                SkiaSwitch::new()
+                    .horizontal_options(LayoutOptions::End)
+                    .vertical_options(LayoutOptions::Center)
+                    .color_frame_on(rgb(ACCENT))
+                    .observe(|me, app: &App| {
+                        me.set_default_value(app.check_updates);
+                        me.set_accessibility_label(app.t().check_updates);
+                    })
+                    .on_toggled(|_me, app: &mut App, _cx, on| {
+                        app.check_updates = on;
+                        app.save();
+                        app.check_for_updates();
+                    }),
+            ))),
         section_title().margin((0, 16, 0, 0)).observe(|me, app: &App| me.set_text(app.t().about)),
         SkiaLabel::new("").font_size(14).text_color(rgb(MUTED)).fill_x().observe(|me, app: &App| {
             let mut text = format!("{} {}", app.t().version, env!("CARGO_PKG_VERSION"));
