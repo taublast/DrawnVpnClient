@@ -49,6 +49,11 @@ impl Server {
         Ok(Server { name, link: link.to_owned(), id, host, port, params })
     }
 
+    /// The same account on the same server, whatever its name and settings in the link.
+    pub fn is_same_server(&self, other: &Server) -> bool {
+        self.id == other.id && self.port == other.port && self.host.eq_ignore_ascii_case(&other.host)
+    }
+
     fn param(&self, key: &str) -> &str {
         self.params.iter().find(|(k, _)| k == key).map_or("", |(_, v)| v.as_str())
     }

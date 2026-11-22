@@ -203,27 +203,42 @@ impl App {
     /// Adds every vless:// link in `text` (one per line), selects the last one added.
     fn import(&mut self, text: &str, cx: &mut Cx) {
         let t = self.t();
-        let mut added = Vec::new();
+        let (mut added, mut updated) = (Vec::new(), Vec::new());
         let mut bad = false;
+        // While the tunnel runs, the selected server is the connected one: it stays selected.
+        let select = |app: &mut App, at: usize| {
+            if !app.vpn.is_on() {
+                app.selected = at;
+            }
+        };
         for line in text.split_whitespace() {
-            match Server::parse(line) {
-                Ok(server) => match self.servers.iter().position(|s| s.link == server.link) {
-                    Some(at) => self.selected = at,
-                    None => {
-                        added.push(server.name.clone());
-                        self.servers.push(server);
-                        self.selected = self.servers.len() - 1;
+            let Ok(server) = Server::parse(line) else {
+                bad = true;
+                continue;
+            };
+            // The same server (user, address, port): a new link replaces its name and settings.
+            match self.servers.iter().position(|s| s.is_same_server(&server)) {
+                Some(at) => {
+                    if self.servers[at].link != server.link {
+                        updated.push(server.name.clone());
+                        self.servers[at] = server;
                     }
-                },
-                Err(_) => bad = true,
+                    select(self, at);
+                }
+                None => {
+                    added.push(server.name.clone());
+                    self.servers.push(server);
+                    select(self, self.servers.len() - 1);
+                }
             }
         }
-        self.notice = match added.len() {
-            0 if text.trim().is_empty() => t.clipboard_empty.to_owned(),
-            0 if bad => t.not_a_link.to_owned(),
-            0 => t.already_added.to_owned(),
-            1 => Texts::fill(t.added, &added[0]),
-            n => Texts::fill(t.added_many, n),
+        self.notice = match (added.len(), updated.len()) {
+            (0, 0) if text.trim().is_empty() => t.clipboard_empty.to_owned(),
+            (0, 0) if bad => t.not_a_link.to_owned(),
+            (0, 0) => t.already_added.to_owned(),
+            (1, 0) => Texts::fill(t.added, &added[0]),
+            (0, 1) => Texts::fill(t.updated, &updated[0]),
+            (a, u) => Texts::fill(t.added_many, a + u),
         };
         cx.items_reset(self.list);
         self.save();
