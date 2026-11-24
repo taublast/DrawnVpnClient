@@ -37,12 +37,14 @@ void nc_free(char *text) { free(text); }
 /// The extension waits for the user to turn it on (System Settings).
 static BOOL approvalPending;
 
-/// Where the user turns the extension on: General > Login Items & Extensions; and the app's own
-/// line saying so ("extension").
+/// Where the user turns the extension on: the Network Extensions sheet of General > Login Items &
+/// Extensions, opened directly with its switch for Net Connect; and the app's own line saying so
+/// ("extension").
 static void askForApproval(void) {
     approvalPending = YES;
     emit(3, @"extension");
-    [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:@"x-apple.systempreferences:com.apple.LoginItems-Settings.extension"]];
+    [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:
+        @"x-apple.systempreferences:com.apple.ExtensionsPreferences?extensionPointIdentifier=com.apple.system_extension.network_extension.extension-point"]];
 }
 
 @interface NCExtensionActivator : NSObject <OSSystemExtensionRequestDelegate>
