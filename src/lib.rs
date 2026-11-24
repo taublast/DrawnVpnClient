@@ -304,15 +304,18 @@ impl App {
     }
 
     /// Connects through the server at `index` (from another one: the service switches).
+    /// The server moves to the top: the list is ordered by last connection.
     fn connect(&mut self, index: usize, cx: &mut Cx) {
-        let Some(server) = self.servers.get(index) else { return };
-        let config = server.xray_config();
-        self.notice.clear();
-        if self.selected != index {
-            self.selected = index;
-            cx.items_reset(self.list);
-            self.save();
+        if index >= self.servers.len() {
+            return;
         }
+        let server = self.servers.remove(index);
+        let config = server.xray_config();
+        self.servers.insert(0, server);
+        self.selected = 0;
+        self.notice.clear();
+        cx.items_reset(self.list);
+        self.save();
         self.vpn = Vpn::Connecting;
         self.detail.clear();
         platform::connect(config, self.t().vpn_is_on);
