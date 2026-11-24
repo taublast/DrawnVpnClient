@@ -68,6 +68,7 @@ const RED: u32 = 0xEF4444;
 // Material Icons (assets/fonts/icons.ttf, a subset).
 const ICON_POWER: &str = "\u{e8ac}";
 const ICON_ADD: &str = "\u{e145}";
+const ICON_REFRESH: &str = "\u{e5d5}";
 const ICON_TEST: &str = "\u{e640}";
 const ICON_SHARE: &str = "\u{e80d}";
 const ICON_DELETE: &str = "\u{e872}";
@@ -777,22 +778,26 @@ fn actions() -> Build<SkiaLayout> {
 
 /// A small pill in the middle: adds the vless:// links on the clipboard.
 fn import_button() -> Build<SkiaShape> {
+    pill_button(ICON_ADD, |app| app.t().import).on_tapped(|_me, app: &mut App, cx| app.import_tapped(cx))
+}
+
+/// The app's secondary button (Import, Check now): a centered outline pill with an icon and a
+/// caption. Outline only: these are used rarely, the connection is what the screens are about.
+fn pill_button(icon: &'static str, caption: fn(&App) -> &'static str) -> Build<SkiaShape> {
     hoverable(SkiaShape::new())
         .corner_radius(22)
         .height_request(44)
         .horizontal_options(LayoutOptions::Center)
-        // Outline only: it is used rarely, the connection is what the screen is about.
         .stroke_color(rgb(MUTED))
         .stroke_width(1.5)
         .animation_tapped(SkiaTouchAnimation::Ripple)
         .accessibility_role(Aria::BUTTON)
-        .observe(|me, app: &App| {
-            me.set_accessibility_label(app.t().import);
+        .observe(move |me, app: &App| {
+            me.set_accessibility_label(caption(app));
             me.set_background_color(hover_wash(app.hovered == Some(me.id())));
         })
-        .on_tapped(|_me, app: &mut App, cx| app.import_tapped(cx))
         .children(SkiaRow::new().spacing(6).padding((16, 0, 20, 0)).vertical_options(LayoutOptions::Center).children((
-            SkiaLabel::new(ICON_ADD)
+            SkiaLabel::new(icon)
                 .font_family("FontIcons")
                 .font_size(20)
                 .text_color(rgb(MUTED))
@@ -804,7 +809,7 @@ fn import_button() -> Build<SkiaShape> {
                 .text_color(rgb(MUTED))
                 .vertical_options(LayoutOptions::Center)
                 .accessibility_role(Aria::PRESENTATION)
-                .observe(|me, app: &App| me.set_text(app.t().import)),
+                .observe(move |me, app: &App| me.set_text(caption(app))),
         )))
 }
 
@@ -1074,29 +1079,10 @@ fn settings_page(app: &mut App) -> Build<SkiaLayout> {
                         app.check_for_updates();
                     }),
             ))),
-        hoverable(SkiaShape::new())
-            .corner_radius(14)
-            .height_request(48)
-            .fill_x()
-            .stroke_color(rgb(LINE))
-            .stroke_width(2)
-            .animation_tapped(SkiaTouchAnimation::Ripple)
-            .accessibility_role(Aria::BUTTON)
-            .observe(|me, app: &App| {
-                me.set_is_visible(UPDATES);
-                me.set_background_color(shade(SURFACE, app.hovered == Some(me.id())));
-                me.set_accessibility_label(if app.manual_check { app.t().checking } else { app.t().check_now });
-            })
-            .on_tapped(|_me, app: &mut App, _cx| app.check_now())
-            .children(
-                SkiaLabel::new("")
-                    .font_family("FontTextBold")
-                    .font_size(15)
-                    .text_color(rgb(TEXT))
-                    .center()
-                    .accessibility_role(Aria::PRESENTATION)
-                    .observe(|me, app: &App| me.set_text(if app.manual_check { app.t().checking } else { app.t().check_now })),
-            ),
+        pill_button(ICON_REFRESH, |app| if app.manual_check { app.t().checking } else { app.t().check_now })
+            .margin((0, 4, 0, 0))
+            .observe(|me, _app: &App| me.set_is_visible(UPDATES))
+            .on_tapped(|_me, app: &mut App, _cx| app.check_now()),
         section_title().margin((0, 16, 0, 0)).observe(|me, app: &App| me.set_text(app.t().about)),
         SkiaLabel::new("").font_size(14).text_color(rgb(MUTED)).fill_x().observe(|me, app: &App| {
             let mut text = format!("{} {}", app.t().version, env!("CARGO_PKG_VERSION"));
