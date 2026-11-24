@@ -45,8 +45,10 @@ void nc_free(char *text) { free(text); }
     return OSSystemExtensionReplacementActionReplace;
 }
 - (void)requestNeedsUserApproval:(OSSystemExtensionRequest *)request {
-    // The request goes on once the user allows it; until then the app says where.
-    emit(3, @"Allow Net Connect in System Settings > Privacy & Security");
+    // The request goes on by itself once the user turns the extension on. Meanwhile the app says
+    // where ("extension": its own text) and opens that page: General > Login Items & Extensions.
+    emit(3, @"extension");
+    [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:@"x-apple.systempreferences:com.apple.LoginItems-Settings.extension"]];
 }
 - (void)request:(OSSystemExtensionRequest *)request didFinishWithResult:(OSSystemExtensionRequestResult)result {
     if (result == OSSystemExtensionRequestWillCompleteAfterReboot) {

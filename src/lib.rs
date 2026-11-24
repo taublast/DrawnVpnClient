@@ -265,6 +265,7 @@ impl App {
             Vpn::Connected => Texts::fill(t.answers_in, &self.detail),
             Vpn::NoResponse => t.no_answer_detail.to_owned(),
             Vpn::Error if self.detail == "permission" => t.permission_denied.to_owned(),
+            Vpn::Error if self.detail == "extension" => t.allow_extension.to_owned(),
             Vpn::Error => self.detail.clone(),
         }
     }

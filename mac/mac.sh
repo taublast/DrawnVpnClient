@@ -13,8 +13,7 @@
 # Accounts, a member of the team): `xcodebuild -exportArchive` with Developer ID and automatic
 # signing makes the profiles the tunnel and the system extension need, signs with the team's
 # cloud-managed Developer ID certificate and submits for notarization. Nothing of the account is
-# stored here. The team: MAC_TEAM from the environment or mac/signing.properties (not in git),
-# else read from the keychain's Apple Development certificate.
+# stored here. The team: MAC_TEAM from the environment or mac/signing.properties (not in git).
 set -eu
 cd "$(dirname "$0")/.."
 root="$PWD"
@@ -44,8 +43,10 @@ if [ -f mac/signing.properties ]; then
         esac
     done < mac/signing.properties
 fi
-team="${MAC_TEAM:-$(security find-certificate -c "Apple Development" -p 2>/dev/null | openssl x509 -noout -subject 2>/dev/null | sed -n 's/.*OU *= *\([A-Z0-9]\{10\}\).*/\1/p' | head -1)}"
-[ -n "$team" ] || { echo "no team: set MAC_TEAM"; exit 1; }
+# The team is never guessed: a keychain can hold certificates of several teams, and the first
+# one found may be another team's.
+team="${MAC_TEAM:-}"
+[ -n "$team" ] || { echo "set MAC_TEAM (the team to sign for) in the environment or mac/signing.properties"; exit 1; }
 group="$team.$bundle_id"
 
 sdk_path=$(xcrun --sdk macosx --show-sdk-path)
