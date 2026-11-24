@@ -69,6 +69,7 @@ const RED: u32 = 0xEF4444;
 const ICON_POWER: &str = "\u{e8ac}";
 const ICON_ADD: &str = "\u{e145}";
 const ICON_REFRESH: &str = "\u{e5d5}";
+const ICON_EXPAND: &str = "\u{e5cf}";
 const ICON_TEST: &str = "\u{e640}";
 const ICON_SHARE: &str = "\u{e80d}";
 const ICON_DELETE: &str = "\u{e872}";
@@ -114,7 +115,12 @@ fn shade(v: u32, hovered: bool) -> Color {
 /// A clickable control with no background of its own: none, or a light wash of the page color
 /// while the mouse is over it.
 fn hover_wash(hovered: bool) -> Color {
-    if hovered { shade(BG, true) } else { Color::TRANSPARENT }
+    hover_wash_on(BG, hovered)
+}
+
+/// The same over another background (a menu panel's).
+fn hover_wash_on(background: u32, hovered: bool) -> Color {
+    if hovered { shade(background, true) } else { Color::TRANSPARENT }
 }
 
 /// Mouse hover (desktop): the control under the pointer goes into the app state, where its
@@ -1042,10 +1048,7 @@ fn settings_page(app: &mut App) -> Build<SkiaLayout> {
                 .observe(|me, app: &App| me.set_text(app.t().settings)),
         )),
         section_title().observe(|me, app: &App| me.set_text(app.t().language)),
-        SkiaStack::new()
-            .spacing(8)
-            .accessibility_role(Aria::RADIO_GROUP)
-            .children(LANGUAGES.into_iter().map(|(lang, name)| language_option(lang, name)).collect::<Vec<_>>()),
+        language_field(),
         section_title().margin((0, 16, 0, 0)).observe(|me, app: &App| {
             me.set_text(app.t().updates);
             me.set_is_visible(UPDATES);
@@ -1096,35 +1099,83 @@ fn settings_page(app: &mut App) -> Build<SkiaLayout> {
     ))
 }
 
-fn language_option(lang: Lang, name: &'static str) -> Build<SkiaShape> {
+/// A language's own name ("Phone language" in the app's language).
+fn language_name(app: &App, lang: Lang) -> &'static str {
+    LANGUAGES.iter().find(|(l, _)| *l == lang).map_or("", |(l, name)| if *l == Lang::System { app.t().system_language } else { name })
+}
+
+/// Settings' language: one field showing the choice, as the DrawnUI Designer's choices dropdown;
+/// a tap opens the list under it. It stays one row however many languages there are.
+fn language_field() -> Build<SkiaShape> {
     card()
-        .accessibility_role(Aria::RADIO)
-        .observe(move |me, app: &App| {
-            let selected = app.lang == lang;
-            style_card(me, selected, app.hovered == Some(me.id()));
-            me.set_accessibility_is_pressed(Some(selected));
-            me.set_accessibility_label(if lang == Lang::System { app.t().system_language } else { name });
+        .observe(|me, app: &App| {
+            style_card(me, false, app.hovered == Some(me.id()));
+            me.set_accessibility_label(format!("{}: {}", app.t().language_label, language_name(app, app.lang)));
         })
-        .on_tapped(move |_me, app: &mut App, cx| app.set_language(lang, cx))
+        .on_tapped(|me, app: &mut App, cx| {
+            app.close_popup(cx);
+            let options = PopupWindowOptions { cpu: true, ..PopupWindowOptions::default() };
+            app.popup = Some(cx.open_popup_window(language_menu(app), me.id(), options));
+        })
         .children(SkiaLayer::new().fill_x().padding((16, 14)).children((
-            SkiaLabel::new(name)
+            SkiaLabel::new("")
                 .font_size(16)
                 .text_color(rgb(TEXT))
                 .vertical_options(LayoutOptions::Center)
-                .observe(move |me, app: &App| {
-                    if lang == Lang::System {
-                        me.set_text(app.t().system_language);
-                    }
-                }),
+                .accessibility_role(Aria::PRESENTATION)
+                .observe(|me, app: &App| me.set_text(language_name(app, app.lang))),
+            SkiaLabel::new(ICON_EXPAND)
+                .font_family("FontIcons")
+                .font_size(24)
+                .text_color(rgb(MUTED))
+                .horizontal_options(LayoutOptions::End)
+                .vertical_options(LayoutOptions::Center)
+                .accessibility_role(Aria::PRESENTATION),
+        )))
+}
+
+/// The language list under the field: the phone's language first, then each by its own name; the
+/// current one carries a check. A long list scrolls.
+fn language_menu(_app: &App) -> Build<SkiaShape> {
+    let rows: Vec<_> = LANGUAGES.into_iter().map(|(lang, _)| language_row(lang)).collect();
+    popup_panel()
+        .width_request(300)
+        .accessibility_role(Aria::MENU)
+        .children(SkiaScroll::new().maximum_height_request(420).content(SkiaStack::new().fill_x().children(rows)))
+}
+
+fn language_row(lang: Lang) -> Build<SkiaLayout> {
+    hoverable(SkiaRow::new())
+        .fill_x()
+        .height_request(48)
+        .padding((16, 0))
+        .spacing(14)
+        .animation_tapped(SkiaTouchAnimation::Ripple)
+        .accessibility_role(Aria::MENU_ITEM_RADIO)
+        .observe(move |me, app: &App| {
+            me.set_background_color(hover_wash_on(SURFACE_HI, app.hovered == Some(me.id())));
+            me.set_accessibility_label(language_name(app, lang));
+            me.set_accessibility_is_pressed(Some(app.lang == lang));
+        })
+        .on_tapped(move |_me, app: &mut App, cx| {
+            app.close_popup(cx);
+            app.set_language(lang, cx);
+        })
+        .children((
             SkiaLabel::new(ICON_CHECK)
                 .font_family("FontIcons")
                 .font_size(22)
                 .text_color(rgb(ACCENT))
-                .horizontal_options(LayoutOptions::End)
                 .vertical_options(LayoutOptions::Center)
                 .accessibility_role(Aria::PRESENTATION)
-                .observe(move |me, app: &App| me.set_is_visible(app.lang == lang)),
-        )))
+                .observe(move |me, app: &App| me.set_opacity(if app.lang == lang { 1.0 } else { 0.0 })),
+            SkiaLabel::new("")
+                .font_size(16)
+                .text_color(rgb(TEXT))
+                .vertical_options(LayoutOptions::Center)
+                .accessibility_role(Aria::PRESENTATION)
+                .observe(move |me, app: &App| me.set_text(language_name(app, lang))),
+        ))
 }
 
 pub fn run() {
