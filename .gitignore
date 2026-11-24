@@ -4,3 +4,4 @@
 /android/libs/*.aar
 /android/keystore.properties
 /ios/signing.properties
+/mac/signing.properties

@@ -1,9 +1,17 @@
-// The iOS side of src/ios.rs: the connection extension through NETunnelProviderManager, the clipboard,
-// links and the phone's language. States go back to Rust through nc_event, as Java's nativeEvent does
-// on Android: 0 off, 1 connecting, 2 connected (text: ms), 3 error (text: message), 4 no answer.
+// The system side of src/apple.rs, iOS and macOS: the connection extension through
+// NETunnelProviderManager (on macOS a system extension, activated first), the clipboard, links and
+// the language; on macOS also the update check's download. States go back to Rust through nc_event,
+// as Java's nativeEvent does on Android: 0 off, 1 connecting, 2 connected (text: ms), 3 error
+// (text: message), 4 no answer, 11 a fetched text.
 #import <Foundation/Foundation.h>
 #import <NetworkExtension/NetworkExtension.h>
+#include <TargetConditionals.h>
+#if TARGET_OS_OSX
+#import <AppKit/AppKit.h>
+#import <SystemExtensions/SystemExtensions.h>
+#else
 #import <UIKit/UIKit.h>
+#endif
 #include <stdlib.h>
 #include <string.h>
 
@@ -22,6 +30,59 @@ static void emit(int kind, NSString *text) { nc_event(kind, (text ?: @"").UTF8St
 static char *copied(NSString *text) { return strdup((text ?: @"").UTF8String); }
 
 void nc_free(char *text) { free(text); }
+
+#if TARGET_OS_OSX
+/// macOS: the tunnel is a system extension inside the app, which the system installs on request
+/// (asking the user once in System Settings) before any configuration can use it.
+@interface NCExtensionActivator : NSObject <OSSystemExtensionRequestDelegate>
+@property (copy) void (^done)(NSError *error);
+@end
+
+@implementation NCExtensionActivator
+- (OSSystemExtensionReplacementAction)request:(OSSystemExtensionRequest *)request
+                  actionForReplacingExtension:(OSSystemExtensionProperties *)existing
+                                withExtension:(OSSystemExtensionProperties *)extension {
+    return OSSystemExtensionReplacementActionReplace;
+}
+- (void)requestNeedsUserApproval:(OSSystemExtensionRequest *)request {
+    // The request goes on once the user allows it; until then the app says where.
+    emit(3, @"Allow Net Connect in System Settings > Privacy & Security");
+}
+- (void)request:(OSSystemExtensionRequest *)request didFinishWithResult:(OSSystemExtensionRequestResult)result {
+    if (result == OSSystemExtensionRequestWillCompleteAfterReboot) {
+        self.done([NSError errorWithDomain:@"connection" code:2 userInfo:@{NSLocalizedDescriptionKey: @"Restart the Mac to finish installing"}]);
+    } else {
+        self.done(nil);
+    }
+}
+- (void)request:(OSSystemExtensionRequest *)request didFailWithError:(NSError *)error {
+    self.done(error);
+}
+@end
+
+static NCExtensionActivator *activator;
+
+/// Installs (or updates) the extension, then runs `then` on the main queue.
+static void activateExtension(void (^then)(void)) {
+    activator = [NCExtensionActivator new];
+    activator.done = ^(NSError *error) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (error) {
+                emit(3, error.localizedDescription);
+            } else {
+                emit(1, @"Connecting");
+                then();
+            }
+        });
+    };
+    OSSystemExtensionRequest *request = [OSSystemExtensionRequest activationRequestForExtension:@"com.appomobi.drawnnetc.connection"
+                                                                                         queue:dispatch_get_main_queue()];
+    request.delegate = activator;
+    [OSSystemExtensionManager.sharedManager submitRequest:request];
+}
+#else
+static void activateExtension(void (^then)(void)) { then(); }
+#endif
 
 /// A test request through the server, in the extension: connected with its delay, or no answer.
 void nc_test(void) {
@@ -123,7 +184,7 @@ void nc_start(void) {
 void nc_connect(const char *config_utf8) {
     NSString *config = [NSString stringWithUTF8String:config_utf8];
     emit(1, @"Connecting");
-    load(^(NETunnelProviderManager *found, NSError *loadError) {
+    activateExtension(^{ load(^(NETunnelProviderManager *found, NSError *loadError) {
         NETunnelProviderManager *m = found ?: [NETunnelProviderManager new];
         NETunnelProviderProtocol *p = [NETunnelProviderProtocol new];
         p.providerBundleIdentifier = kProvider;
@@ -161,7 +222,7 @@ void nc_connect(const char *config_utf8) {
                 });
             }];
         }];
-    });
+    }); });
 }
 
 void nc_disconnect(void) {
@@ -178,12 +239,23 @@ void nc_disconnect(void) {
 
 void nc_copy_text(const char *text) {
     NSString *s = [NSString stringWithUTF8String:text];
+#if TARGET_OS_OSX
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [NSPasteboard.generalPasteboard clearContents];
+        [NSPasteboard.generalPasteboard setString:s forType:NSPasteboardTypeString];
+    });
+#else
     dispatch_async(dispatch_get_main_queue(), ^{ UIPasteboard.generalPasteboard.string = s; });
+#endif
 }
 
 char *nc_clipboard_text(void) {
     __block NSString *text = nil;
+#if TARGET_OS_OSX
+    void (^read)(void) = ^{ text = [NSPasteboard.generalPasteboard stringForType:NSPasteboardTypeString]; };
+#else
     void (^read)(void) = ^{ text = UIPasteboard.generalPasteboard.string; };
+#endif
     if (NSThread.isMainThread) read(); else dispatch_sync(dispatch_get_main_queue(), read);
     return copied(text);
 }
@@ -191,10 +263,31 @@ char *nc_clipboard_text(void) {
 void nc_open_url(const char *url) {
     NSURL *u = [NSURL URLWithString:[NSString stringWithUTF8String:url]];
     if (u == nil) return;
+#if TARGET_OS_OSX
+    dispatch_async(dispatch_get_main_queue(), ^{ [NSWorkspace.sharedWorkspace openURL:u]; });
+#else
     dispatch_async(dispatch_get_main_queue(), ^{ [UIApplication.sharedApplication openURL:u options:@{} completionHandler:nil]; });
+#endif
 }
 
-/// "ru", "en", ...: the phone's first preferred language.
+#if TARGET_OS_OSX
+/// The update check's download (macOS): the text, or "" when it failed, as event 11, with the
+/// headers Android's fetchText sends.
+void nc_fetch(const char *url_utf8) {
+    NSURL *url = [NSURL URLWithString:[NSString stringWithUTF8String:url_utf8]];
+    if (url == nil) { emit(11, @""); return; }
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:20];
+    [request setValue:@"NetConnect" forHTTPHeaderField:@"User-Agent"];
+    [request setValue:@"application/vnd.github+json" forHTTPHeaderField:@"Accept"];
+    [[NSURLSession.sharedSession dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        NSInteger code = [response isKindOfClass:NSHTTPURLResponse.class] ? ((NSHTTPURLResponse *)response).statusCode : 0;
+        NSString *body = (code == 200 && data) ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : @"";
+        emit(11, body ?: @"");
+    }] resume];
+}
+#endif
+
+/// "ru", "en", ...: the first preferred language.
 char *nc_system_language(void) {
     NSString *first = NSLocale.preferredLanguages.firstObject ?: @"";
     return copied([first componentsSeparatedByString:@"-"].firstObject);

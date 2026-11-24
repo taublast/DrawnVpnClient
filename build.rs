@@ -16,8 +16,12 @@ fn main() {
     if target == "ios" {
         // The iOS side (ios/app/glue.m), compiled with Xcode's clang and linked into the app.
         // The bundle with its assets is made by ios/ios.sh.
-        ios_glue(&env::var("OUT_DIR").unwrap());
+        apple_glue(&env::var("OUT_DIR").unwrap(), false);
         return;
+    }
+    if target == "macos" {
+        // The same glue for macOS (AppKit, the system extension); the bundle is made by mac/mac.sh.
+        apple_glue(&env::var("OUT_DIR").unwrap(), true);
     }
     if target == "windows" {
         embed_resource::compile("app.rc", embed_resource::NONE).manifest_optional().unwrap();
@@ -43,13 +47,16 @@ fn copy_folder(from: &Path, to: &Path) {
     }
 }
 
-fn ios_glue(out: &str) {
+fn apple_glue(out: &str, macos: bool) {
     use std::process::Command;
     println!("cargo:rerun-if-changed=ios/app/glue.m");
     // Another Xcode (SDK) relinks the app.
     println!("cargo:rerun-if-env-changed=DEVELOPER_DIR");
-    let sim = env::var("TARGET").unwrap_or_default().ends_with("-sim");
-    let (sdk, target) = if sim { ("iphonesimulator", "arm64-apple-ios14.0-simulator") } else { ("iphoneos", "arm64-apple-ios14.0") };
+    let rust_target = env::var("TARGET").unwrap_or_default();
+    let sim = rust_target.ends_with("-sim");
+    let arch = if rust_target.starts_with("x86_64") { "x86_64" } else { "arm64" };
+    let clang_target = if macos { format!("{arch}-apple-macos13.0") } else if sim { "arm64-apple-ios14.0-simulator".into() } else { "arm64-apple-ios14.0".into() };
+    let (sdk, target) = (if macos { "macosx" } else if sim { "iphonesimulator" } else { "iphoneos" }, clang_target.as_str());
     let object = Path::new(out).join("glue.o");
     let library = Path::new(out).join("libnetconnectglue.a");
     let ok = Command::new("xcrun")
@@ -63,7 +70,8 @@ fn ios_glue(out: &str) {
     assert!(ok, "ar failed");
     println!("cargo:rustc-link-search=native={out}");
     println!("cargo:rustc-link-lib=static=netconnectglue");
-    for framework in ["NetworkExtension", "UIKit", "Foundation"] {
+    let frameworks: &[&str] = if macos { &["NetworkExtension", "SystemExtensions", "AppKit", "Foundation"] } else { &["NetworkExtension", "UIKit", "Foundation"] };
+    for framework in frameworks {
         println!("cargo:rustc-link-lib=framework={framework}");
     }
 }

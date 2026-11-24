@@ -1,6 +1,6 @@
-//! The iOS side (ios/app/glue.m): the connection extension through NetworkExtension, the clipboard,
-//! links, the language; and the states it sends back (`nc_event`), queued for the UI thread. The same
-//! functions as src/android.rs.
+//! iOS and macOS: the system side (ios/app/glue.m, mac/app/glue.m): the connection extension through
+//! NetworkExtension, the clipboard, links, the language, on macOS the update check's download; and
+//! what it sends back (`nc_event`), queued for the UI thread. The same functions as src/android.rs.
 
 use std::ffi::{CStr, CString, c_char, c_int};
 use std::sync::Mutex;
@@ -23,6 +23,8 @@ unsafe extern "C" {
     fn nc_system_language() -> *mut c_char;
     fn nc_core_version() -> *mut c_char;
     fn nc_free(text: *mut c_char);
+    #[cfg(target_os = "macos")]
+    fn nc_fetch(url: *const c_char);
 }
 
 fn c(text: &str) -> CString {
@@ -54,9 +56,11 @@ pub fn take_events() -> Vec<Event> {
     std::mem::take(&mut *EVENTS.lock().unwrap_or_else(|e| e.into_inner()))
 }
 
-/// The app's own Application Support folder.
+/// iOS: the app's own Application Support folder; macOS: a folder of the app's in the user's.
 pub fn data_dir() -> Option<std::path::PathBuf> {
     let dir = std::path::PathBuf::from(std::env::var_os("HOME")?).join("Library/Application Support");
+    #[cfg(target_os = "macos")]
+    let dir = dir.join("Net Connect");
     std::fs::create_dir_all(&dir).ok()?;
     Some(dir)
 }
@@ -76,8 +80,19 @@ pub fn test() {
     unsafe { nc_test() };
 }
 
-/// No update check on iOS (installs come through TestFlight or Ad Hoc): never asked.
+/// iOS: no update check (installs come through TestFlight or Ad Hoc), never asked.
+#[cfg(target_os = "ios")]
 pub fn fetch(_url: &str) {}
+
+/// macOS: downloads `url` as text; the answer comes back as `Event::Fetched` ("" when it failed).
+#[cfg(target_os = "macos")]
+pub fn fetch(url: &str) {
+    let url = c(url);
+    unsafe { nc_fetch(url.as_ptr()) };
+}
+
+/// The event kind of a fetched text (Android's MainActivity.EVENT_FETCHED); 0..4 are tunnel states.
+const EVENT_FETCHED: c_int = 11;
 
 pub fn open_url(url: &str) {
     let url = c(url);
@@ -107,7 +122,8 @@ pub fn core_version() -> String {
 #[unsafe(no_mangle)]
 pub extern "C" fn nc_event(kind: c_int, text: *const c_char) {
     let text = if text.is_null() { String::new() } else { unsafe { CStr::from_ptr(text) }.to_string_lossy().into_owned() };
-    EVENTS.lock().unwrap_or_else(|e| e.into_inner()).push(Event::State(kind, text));
+    let event = if kind == EVENT_FETCHED { Event::Fetched(text) } else { Event::State(kind, text) };
+    EVENTS.lock().unwrap_or_else(|e| e.into_inner()).push(event);
     if let Some((waker, id)) = WAKE.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
         waker.invalidate(*id, Dirty::APPLY);
     }

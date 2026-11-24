@@ -8,11 +8,11 @@ mod update;
 mod android;
 #[cfg(target_os = "android")]
 use android as platform;
-#[cfg(target_os = "ios")]
-mod ios;
-#[cfg(target_os = "ios")]
-use ios as platform;
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(any(target_os = "ios", target_os = "macos"))]
+mod apple;
+#[cfg(any(target_os = "ios", target_os = "macos"))]
+use apple as platform;
+#[cfg(not(any(target_os = "android", target_os = "ios", target_os = "macos")))]
 mod platform {
     //! Desktop: the UI runs, there is no tunnel.
     use super::Event;
@@ -73,16 +73,48 @@ const ROUTE_SETTINGS: &str = "settings";
 const RELEASES: &str = "https://api.github.com/repos/taublast/DrawnVpnClient/releases?per_page=20";
 /// The release file for this build's phones, short to type and share: netconnect-010-arm64.apk and
 /// netconnect-010-armv7.apk for 0.1.0.
-#[cfg(not(target_arch = "arm"))]
+#[cfg(all(not(target_arch = "arm"), not(target_os = "macos")))]
 const RELEASE_ASSET: &str = "-arm64.apk";
 #[cfg(target_arch = "arm")]
 const RELEASE_ASSET: &str = "-armv7.apk";
+/// macOS: one universal app, netconnect-012-macos.zip for 0.1.2.
+#[cfg(target_os = "macos")]
+const RELEASE_ASSET: &str = "-macos.zip";
 /// iOS installs come through TestFlight or Ad Hoc: no update check there, and no Settings section.
 const UPDATES: bool = !cfg!(target_os = "ios");
 const UPDATE_CHECK_EVERY: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
 
 fn rgb(v: u32) -> Color {
     Color::new(0xFF00_0000 | v)
+}
+
+/// A clickable control's color: its state's color `v`, 10 % lighter (toward white) while the mouse
+/// is over it, so the hover shows on top of the state.
+fn shade(v: u32, hovered: bool) -> Color {
+    if !hovered {
+        return rgb(v);
+    }
+    let light = |c: u32| c + (255 - c) / 10;
+    rgb(light(v >> 16 & 0xFF) << 16 | light(v >> 8 & 0xFF) << 8 | light(v & 0xFF))
+}
+
+/// A clickable control with no background of its own: none, or a light wash of the page color
+/// while the mouse is over it.
+fn hover_wash(hovered: bool) -> Color {
+    if hovered { shade(BG, true) } else { Color::TRANSPARENT }
+}
+
+/// Mouse hover (desktop): the control under the pointer goes into the app state, where its
+/// observer reads it to shade its color. Touch never hovers, so phones look as before.
+fn hoverable<T: Control>(b: Build<T>) -> Build<T> {
+    b.on_hovered(|me, app: &mut App, _cx, on| {
+        let id = me.id();
+        if on {
+            app.hovered = Some(id);
+        } else if app.hovered == Some(id) {
+            app.hovered = None;
+        }
+    })
 }
 
 /// What the Java side reports (MainActivity.nativeEvent).
@@ -154,6 +186,8 @@ struct App {
     entry_error: bool,
     /// The server the menu was opened for, and its card: the delete question opens there too.
     menu_for: Option<(usize, ControlId)>,
+    /// The clickable control under the mouse pointer (desktop; touch never hovers).
+    hovered: Option<ControlId>,
     lang: Lang,
     /// A newer release on GitHub, the version the user put off with Later, the setting, and when
     /// GitHub was last asked.
@@ -439,13 +473,14 @@ fn main_page(app: &mut App) -> Build<SkiaLayout> {
 
 /// A round icon button for headers (settings, back).
 fn icon_button(icon: &'static str) -> Build<SkiaShape> {
-    SkiaShape::new()
+    hoverable(SkiaShape::new())
         .shape_type(ShapeType::Circle)
         .width_request(44)
         .lock_ratio(1)
         .vertical_options(LayoutOptions::Center)
         .animation_tapped(SkiaTouchAnimation::Ripple)
         .accessibility_role(Aria::BUTTON)
+        .observe(|me, app: &App| me.set_background_color(hover_wash(app.hovered == Some(me.id()))))
         .children(SkiaLabel::new(icon).font_family("FontIcons").font_size(24).text_color(rgb(TEXT)).center().accessibility_role(Aria::PRESENTATION))
 }
 
@@ -471,14 +506,17 @@ fn header() -> Build<SkiaLayout> {
 /// A newer release on GitHub: Download opens its APK in the browser, Later hides this version.
 fn update_banner() -> Build<SkiaShape> {
     let button = |text: fn(&Texts) -> &'static str, color: u32, download: bool| {
-        SkiaShape::new()
+        hoverable(SkiaShape::new())
             .corner_radius(10)
             .height_request(38)
             .fill_x()
             .background_color(rgb(color))
             .animation_tapped(SkiaTouchAnimation::Ripple)
             .accessibility_role(Aria::BUTTON)
-            .observe(move |me, app: &App| me.set_accessibility_label(text(app.t())))
+            .observe(move |me, app: &App| {
+                me.set_accessibility_label(text(app.t()));
+                me.set_background_color(shade(color, app.hovered == Some(me.id())));
+            })
             .on_tapped(move |_me, app: &mut App, _cx| {
                 let Some(update) = app.offered().cloned() else { return };
                 if download {
@@ -527,7 +565,7 @@ fn update_banner() -> Build<SkiaShape> {
 
 /// The big round button: gray off, amber connecting, green on.
 fn power_button() -> Build<SkiaShape> {
-    SkiaShape::new()
+    hoverable(SkiaShape::new())
         .shape_type(ShapeType::Circle)
         .width_request(184)
         .lock_ratio(1)
@@ -539,6 +577,7 @@ fn power_button() -> Build<SkiaShape> {
         .accessibility_role(Aria::BUTTON)
         .observe(|me, app: &App| {
             me.set_stroke_color(rgb(if app.vpn == Vpn::Off { MUTED } else { app.vpn.color() }));
+            me.set_background_color(shade(SURFACE, app.hovered == Some(me.id())));
             me.set_accessibility_label(if app.vpn.is_on() { app.t().disconnect } else { app.t().connect });
         })
         .on_tapped(|_me, app: &mut App, cx| app.toggle(cx))
@@ -603,11 +642,11 @@ struct CellHandles {
 
 /// A card: the background and border show which one is selected.
 fn card() -> Build<SkiaShape> {
-    SkiaShape::new().corner_radius(14).fill_x().stroke_width(2).animation_tapped(SkiaTouchAnimation::Ripple).accessibility_role(Aria::BUTTON)
+    hoverable(SkiaShape::new()).corner_radius(14).fill_x().stroke_width(2).animation_tapped(SkiaTouchAnimation::Ripple).accessibility_role(Aria::BUTTON)
 }
 
-fn style_card(card: &mut Mut<'_, SkiaShape>, selected: bool) {
-    card.set_background_color(rgb(if selected { SURFACE_HI } else { SURFACE }));
+fn style_card(card: &mut Mut<'_, SkiaShape>, selected: bool, hovered: bool) {
+    card.set_background_color(shade(if selected { SURFACE_HI } else { SURFACE }, hovered));
     card.set_stroke_color(rgb(if selected { ACCENT } else { LINE }));
 }
 
@@ -615,6 +654,17 @@ fn server_cell() -> (Build<SkiaShape>, CellHandles) {
     let mut h = CellHandles { card: Handle::default(), name: Handle::default(), info: Handle::default() };
     let cell = card()
         .assign(&mut h.card)
+        // A recycled cell is bound only when the list changes: hover restyles it here.
+        .on_hovered(|me, app: &mut App, _cx, on| {
+            let id = me.id();
+            if on {
+                app.hovered = Some(id);
+            } else if app.hovered == Some(id) {
+                app.hovered = None;
+            }
+            let selected = me.base().context_index == Some(app.selected);
+            style_card(me, selected, on);
+        })
         .on_tapped(|me, app: &mut App, cx| {
             let Some(index) = me.base().context_index else { return };
             app.close_popup(cx);
@@ -633,7 +683,8 @@ fn bind_server(h: &CellHandles, app: &App, index: usize, cx: &mut Cx) {
     let t = app.t();
     let selected = index == app.selected;
     if let Some(mut card) = cx.get_mut(h.card) {
-        style_card(&mut card, selected);
+        let hovered = app.hovered == Some(h.card.id());
+        style_card(&mut card, selected, hovered);
         card.set_accessibility_label(if selected { format!("{}, {}", server.name, t.selected) } else { server.name.clone() });
     }
     if let Some(mut name) = cx.get_mut(h.name) {
@@ -662,7 +713,7 @@ fn actions() -> Build<SkiaLayout> {
 
 /// A small pill in the middle: adds the vless:// links on the clipboard.
 fn import_button() -> Build<SkiaShape> {
-    SkiaShape::new()
+    hoverable(SkiaShape::new())
         .corner_radius(22)
         .height_request(44)
         .horizontal_options(LayoutOptions::Center)
@@ -671,7 +722,10 @@ fn import_button() -> Build<SkiaShape> {
         .stroke_width(1.5)
         .animation_tapped(SkiaTouchAnimation::Ripple)
         .accessibility_role(Aria::BUTTON)
-        .observe(|me, app: &App| me.set_accessibility_label(app.t().import))
+        .observe(|me, app: &App| {
+            me.set_accessibility_label(app.t().import);
+            me.set_background_color(hover_wash(app.hovered == Some(me.id())));
+        })
         .on_tapped(|_me, app: &mut App, cx| app.import_tapped(cx))
         .children(SkiaRow::new().spacing(6).padding((16, 0, 20, 0)).vertical_options(LayoutOptions::Center).children((
             SkiaLabel::new(ICON_ADD)
@@ -694,7 +748,7 @@ fn import_button() -> Build<SkiaShape> {
 fn entry_dialog(app: &mut App) -> Build<SkiaLayout> {
     let t = app.t();
     let button = |text: &'static str, color: u32, add: bool| {
-        SkiaShape::new()
+        hoverable(SkiaShape::new())
             .corner_radius(10)
             .height_request(44)
             .fill_x()
@@ -702,6 +756,7 @@ fn entry_dialog(app: &mut App) -> Build<SkiaLayout> {
             .animation_tapped(SkiaTouchAnimation::Ripple)
             .accessibility_role(Aria::BUTTON)
             .accessibility_label(text)
+            .observe(move |me, app: &App| me.set_background_color(shade(color, app.hovered == Some(me.id()))))
             .on_tapped(move |_me, app: &mut App, cx| {
                 if add {
                     let text = app.entry_text.clone();
@@ -819,7 +874,7 @@ fn server_menu(app: &App, index: usize) -> Build<SkiaShape> {
 
 /// A menu line: `action(app, server index, cx)` runs after the menu closed.
 fn menu_item(icon: &'static str, text: &'static str, color: u32, action: fn(&mut App, usize, &mut Cx)) -> Build<SkiaLayout> {
-    SkiaRow::new()
+    hoverable(SkiaRow::new())
         .fill_x()
         .height_request(48)
         .padding((16, 0))
@@ -827,6 +882,10 @@ fn menu_item(icon: &'static str, text: &'static str, color: u32, action: fn(&mut
         .animation_tapped(SkiaTouchAnimation::Ripple)
         .accessibility_role(Aria::MENU_ITEM)
         .accessibility_label(text)
+        .observe(|me, app: &App| {
+            let hovered = app.hovered == Some(me.id());
+            me.set_background_color(if hovered { shade(SURFACE_HI, true) } else { Color::TRANSPARENT });
+        })
         .on_tapped(move |_me, app: &mut App, cx| {
             let index = app.menu_for.map(|(index, _)| index);
             app.close_popup(cx);
@@ -854,7 +913,7 @@ fn delete_question(app: &App, index: usize) -> Build<SkiaShape> {
     let t = app.t();
     let question = Texts::fill(t.delete_question, app.servers.get(index).map_or("", |s| s.name.as_str()));
     let button = |text: &'static str, color: u32, delete: bool| {
-        SkiaShape::new()
+        hoverable(SkiaShape::new())
             .corner_radius(10)
             .height_request(40)
             .fill_x()
@@ -862,6 +921,7 @@ fn delete_question(app: &App, index: usize) -> Build<SkiaShape> {
             .animation_tapped(SkiaTouchAnimation::Ripple)
             .accessibility_role(Aria::BUTTON)
             .accessibility_label(text)
+            .observe(move |me, app: &App| me.set_background_color(shade(color, app.hovered == Some(me.id()))))
             .on_tapped(move |_me, app: &mut App, cx| {
                 let index = app.menu_for.map(|(index, _)| index);
                 app.close_popup(cx);
@@ -968,7 +1028,7 @@ fn language_option(lang: Lang, name: &'static str) -> Build<SkiaShape> {
         .accessibility_role(Aria::RADIO)
         .observe(move |me, app: &App| {
             let selected = app.lang == lang;
-            style_card(me, selected);
+            style_card(me, selected, app.hovered == Some(me.id()));
             me.set_accessibility_is_pressed(Some(selected));
             me.set_accessibility_label(if lang == Lang::System { app.t().system_language } else { name });
         })
@@ -995,7 +1055,15 @@ fn language_option(lang: Lang, name: &'static str) -> Build<SkiaShape> {
 }
 
 pub fn run() {
-    drawnui::run("Net Connect", || {
+    // macOS: a phone-like window (the layout is the phones'); elsewhere the platform's own size.
+    #[cfg(target_os = "macos")]
+    drawnui::run_sized("Net Connect", 420.0, 860.0, make_ui);
+    #[cfg(not(target_os = "macos"))]
+    drawnui::run("Net Connect", make_ui);
+}
+
+fn make_ui() -> Box<dyn drawnui::App> {
+    {
         // Toasts on the app's dark theme: the default near-black one would not show.
         SkiaShell::set_defaults(ShellDefaults {
             toast_background_color: rgb(SURFACE_HI),
@@ -1011,7 +1079,7 @@ pub fn run() {
             .background(rgb(BG));
         platform::set_waker(ui.waker(), ui.state.mailbox.id());
         Box::new(ui)
-    });
+    }
 }
 
 #[cfg(target_os = "android")]
