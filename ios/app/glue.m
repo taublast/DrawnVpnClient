@@ -119,7 +119,11 @@ void nc_connect(const char *config_utf8) {
         // The first time, the system asks the user to allow the configuration.
         [m saveToPreferencesWithCompletionHandler:^(NSError *saveError) {
             if (saveError) {
-                dispatch_async(dispatch_get_main_queue(), ^{ emit(3, saveError.localizedDescription); });
+                // Don't Allow (or no passcode): "permission", for which the app shows its own text,
+                // as Android's MainActivity sends it.
+                BOOL refused = [saveError.domain isEqualToString:NEVPNErrorDomain] && saveError.code == NEVPNErrorConfigurationReadWriteFailed;
+                NSString *detail = refused ? @"permission" : saveError.localizedDescription;
+                dispatch_async(dispatch_get_main_queue(), ^{ emit(3, detail); });
                 return;
             }
             // A saved configuration must be loaded again before it can start.

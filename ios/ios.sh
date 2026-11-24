@@ -223,7 +223,8 @@ ext_profile="${IOS_EXT_PROFILE:-$(find_profile "$ext_id")}"
 [ -n "$app_profile" ] || { echo "no development profile for $bundle_id with this iPhone ($udid)"; exit 1; }
 [ -n "$ext_profile" ] || { echo "no development profile for $ext_id with this iPhone ($udid)"; exit 1; }
 
-# Entitlements: the ones the profile grants that the app needs.
+# Entitlements: the ones the profile grants that the app needs (the tunnel; no app group: the
+# configuration reaches the extension through NETunnelProviderProtocol).
 entitlements() {
     security cms -D -i "$1" > "$tmp/profile.plist"
     python3 - "$tmp/profile.plist" "$2" <<'PY'
@@ -234,8 +235,6 @@ out = {k: e[k] for k in ("application-identifier", "com.apple.developer.team-ide
 if "packet-tunnel-provider" not in e.get("com.apple.developer.networking.networkextension", []):
     sys.exit(f"{sys.argv[1]}: no packet-tunnel-provider (Network Extensions capability)")
 out["com.apple.developer.networking.networkextension"] = ["packet-tunnel-provider"]
-if e.get("com.apple.security.application-groups"):
-    out["com.apple.security.application-groups"] = e["com.apple.security.application-groups"]
 plistlib.dump(out, open(sys.argv[2], "wb"))
 PY
 }

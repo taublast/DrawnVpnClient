@@ -34,7 +34,7 @@ var (
 )
 
 // An extension gets 50 MB in all: Go's heap is kept well under it, and freed memory goes back to
-// the system every second (as libXray does on iOS).
+// the system every 10 seconds (libXray does it every second, which wakes the phone more often).
 const memoryLimit = 30 << 20
 
 func limitMemory() {
@@ -43,7 +43,7 @@ func limitMemory() {
 		debug.SetMemoryLimit(memoryLimit)
 		go func() {
 			for {
-				time.Sleep(time.Second)
+				time.Sleep(10 * time.Second)
 				debug.FreeOSMemory()
 			}
 		}()
@@ -101,8 +101,10 @@ func EngineStop() {
 	debug.FreeOSMemory()
 }
 
-// EngineMeasure: a request to `url` through the running Xray (its default outbound, the server), as
-// Android's measureDelay. Milliseconds, or -1 when it got no answer or Xray is not running.
+// EngineMeasure: the delay of a request to `url` through the running Xray (its default outbound, the
+// server), measured as Android's AndroidLibXrayLite does (measureInstDelay): two GETs on one kept
+// connection, the faster one counts, so the server's delay is not the first connection's set-up.
+// Milliseconds, or -1 when no request got an answer or Xray is not running.
 //
 //export EngineMeasure
 func EngineMeasure(url *C.char, timeoutMs C.int) C.longlong {
@@ -113,7 +115,10 @@ func EngineMeasure(url *C.char, timeoutMs C.int) C.longlong {
 		return -1
 	}
 	timeout := time.Duration(timeoutMs) * time.Millisecond
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
 	transport := &http.Transport{
+		TLSHandshakeTimeout: timeout / 2,
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			dest, err := xnet.ParseDestination(network + ":" + addr)
 			if err != nil {
@@ -121,19 +126,31 @@ func EngineMeasure(url *C.char, timeoutMs C.int) C.longlong {
 			}
 			return core.Dial(ctx, server, dest)
 		},
-		TLSHandshakeTimeout: timeout,
-		DisableKeepAlives:   true,
 	}
 	defer transport.CloseIdleConnections()
 	client := &http.Client{Transport: transport, Timeout: timeout}
-	start := time.Now()
-	resp, err := client.Get(C.GoString(url))
-	if err != nil {
-		return -1
+	target := C.GoString(url)
+	best := int64(-1)
+	for attempt := 0; attempt < 2; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+		if err != nil {
+			break
+		}
+		start := time.Now()
+		resp, err := client.Do(req)
+		if err != nil {
+			continue
+		}
+		_, err = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+		if err != nil || (resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent) {
+			continue
+		}
+		if ms := time.Since(start).Milliseconds(); best < 0 || ms < best {
+			best = ms
+		}
 	}
-	_, _ = io.Copy(io.Discard, resp.Body)
-	_ = resp.Body.Close()
-	return C.longlong(time.Since(start).Milliseconds())
+	return C.longlong(best)
 }
 
 // EngineVersion: "Xray-core v26.11.9"; free it with EngineFree.
