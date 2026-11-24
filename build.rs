@@ -46,6 +46,8 @@ fn copy_folder(from: &Path, to: &Path) {
 fn ios_glue(out: &str) {
     use std::process::Command;
     println!("cargo:rerun-if-changed=ios/app/glue.m");
+    // Another Xcode (SDK) relinks the app.
+    println!("cargo:rerun-if-env-changed=DEVELOPER_DIR");
     let sim = env::var("TARGET").unwrap_or_default().ends_with("-sim");
     let (sdk, target) = if sim { ("iphonesimulator", "arm64-apple-ios14.0-simulator") } else { ("iphoneos", "arm64-apple-ios14.0") };
     let object = Path::new(out).join("glue.o");

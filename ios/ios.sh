@@ -10,6 +10,9 @@
 #   IOS_IDENTITY      codesigning identity; default: the first "Apple Development" one
 #   IOS_APP_PROFILE   development profile for com.appomobi.drawnnetc
 #   IOS_EXT_PROFILE   development profile for com.appomobi.drawnnetc.connection
+#   IOS_DEVELOPER_DIR the Xcode to build with (its Contents/Developer). Until the app adopts the
+#                     UIScene lifecycle it must be an iOS 26 SDK Xcode: UIKit stops an app linked
+#                     against the iOS 27 SDK without scenes at launch, even on iOS 26.
 # Both profiles need the Network Extensions capability (packet-tunnel-provider); without a path the
 # newest installed development profile for that exact id and this iPhone is used.
 set -eu
@@ -36,12 +39,20 @@ done
 if [ -f ios/signing.properties ]; then
     while IFS='=' read -r key value; do
         case "$key" in
-            IOS_DEVICE|IOS_IDENTITY|IOS_APP_PROFILE|IOS_EXT_PROFILE)
+            IOS_DEVICE|IOS_IDENTITY|IOS_APP_PROFILE|IOS_EXT_PROFILE|IOS_DEVELOPER_DIR)
                 eval "current=\${$key:-}"
                 [ -n "$current" ] || export "$key=$value" ;;
         esac
     done < ios/signing.properties
 fi
+
+if [ -n "${IOS_DEVELOPER_DIR:-}" ]; then
+    export DEVELOPER_DIR="$IOS_DEVELOPER_DIR"
+fi
+sdk_version=$(xcrun --sdk iphoneos --show-sdk-version)
+case "$sdk_version" in
+    2[7-9]*|[3-9]*) echo "iOS SDK $sdk_version: the app would stop at launch (no UIScene yet); set IOS_DEVELOPER_DIR to an iOS 26 SDK Xcode"; exit 1 ;;
+esac
 
 target=aarch64-apple-ios
 sdk_path=$(xcrun --sdk iphoneos --show-sdk-path)
@@ -59,7 +70,8 @@ engine_version=$(sed -n 's/.*Xray-core v\([0-9.]*\).*/\1/p' ios/engine/go.mod | 
     cd ios/engine
     clang=$(xcrun --sdk iphoneos -f clang)
     flags="-isysroot $sdk_path -arch arm64 -miphoneos-version-min=$min_ios"
-    GOOS=ios GOARCH=arm64 CGO_ENABLED=1 CC="$clang" CGO_CFLAGS="$flags" CGO_LDFLAGS="$flags" \
+    # Xray-core needs Go 1.27; an older go on PATH fetches it for this build (GOTOOLCHAIN).
+    GOTOOLCHAIN="${GOTOOLCHAIN_ENGINE:-go1.27.3}" GOOS=ios GOARCH=arm64 CGO_ENABLED=1 CC="$clang" CGO_CFLAGS="$flags" CGO_LDFLAGS="$flags" \
         go build -buildmode=c-archive -trimpath -ldflags="-s -w -buildid=" -o "$work/libengine.a" .
 )
 
@@ -164,7 +176,7 @@ import json, sys
 wanted, found = sys.argv[2], []
 for d in json.load(open(sys.argv[1]))["result"]["devices"]:
     hw, props = d.get("hardwareProperties", {}), d.get("connectionProperties", {})
-    if hw.get("deviceType") != "iPhone":
+    if hw.get("deviceType") != "iPhone" or hw.get("reality") != "physical":
         continue
     if wanted and wanted not in (d.get("identifier"), hw.get("udid")):
         continue
