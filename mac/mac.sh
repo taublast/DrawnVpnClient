@@ -1,23 +1,20 @@
 #!/bin/sh
 # macOS, on a Mac with Xcode and Go 1.27+: builds the app (Rust, DrawnUI) and its connection system
 # extension (Swift + the engine: Xray-core as a Go C archive), both universal (Apple silicon + Intel),
-# bundles them, signs both.
-#   mac/mac.sh            build, sign (development), install into /Applications, open
-#   mac/mac.sh build      build and sign only
-#   mac/mac.sh release    sign with Developer ID, notarize, staple, zip:
-#                         target/.../macos/netconnect-<version without dots>-macos.zip
+# signs them with Developer ID and notarizes them, and zips the release:
+# target/.../macos/netconnect-<version without dots>-macos.zip.
+#   mac/mac.sh            build, sign, notarize, zip, install into /Applications and open
+#   mac/mac.sh release    build, sign, notarize, zip
+#   mac/mac.sh build      build only, ad-hoc signed (for checking the build; it cannot connect)
 # A system extension runs only from /Applications; the first connect asks the user to allow it in
 # System Settings > Privacy & Security, then to allow the VPN configuration.
 #
-# Signing, from the environment or from mac/signing.properties (KEY=value lines, not in git):
-#   MAC_IDENTITY        codesigning identity; default: the first "Apple Development" one
-#                       (release: the first "Developer ID Application" one)
-#   MAC_APP_PROFILE     macOS provisioning profile for com.appomobi.drawnnetc
-#   MAC_EXT_PROFILE     macOS provisioning profile for com.appomobi.drawnnetc.connection
-#   MAC_NOTARY_PROFILE  release: the keychain profile of `xcrun notarytool store-credentials`
-# Both profiles need the System Extension and Network Extensions capabilities and an app group;
-# without a path the newest installed profile for that exact id (and this Mac, for development)
-# is used.
+# Signing and notarizing go through the Apple ID that Xcode is signed in to (Xcode > Settings >
+# Accounts, a member of the team): `xcodebuild -exportArchive` with Developer ID and automatic
+# signing makes the profiles the tunnel and the system extension need, signs with the team's
+# cloud-managed Developer ID certificate and submits for notarization. Nothing of the account is
+# stored here. The team: MAC_TEAM from the environment or mac/signing.properties (not in git),
+# else read from the keychain's Apple Development certificate.
 set -eu
 cd "$(dirname "$0")/.."
 root="$PWD"
@@ -41,12 +38,15 @@ done
 if [ -f mac/signing.properties ]; then
     while IFS='=' read -r key value; do
         case "$key" in
-            MAC_IDENTITY|MAC_APP_PROFILE|MAC_EXT_PROFILE|MAC_NOTARY_PROFILE)
+            MAC_TEAM)
                 eval "current=\${$key:-}"
                 [ -n "$current" ] || export "$key=$value" ;;
         esac
     done < mac/signing.properties
 fi
+team="${MAC_TEAM:-$(security find-certificate -c "Apple Development" -p 2>/dev/null | openssl x509 -noout -subject 2>/dev/null | sed -n 's/.*OU *= *\([A-Z0-9]\{10\}\).*/\1/p' | head -1)}"
+[ -n "$team" ] || { echo "no team: set MAC_TEAM"; exit 1; }
+group="$team.$bundle_id"
 
 sdk_path=$(xcrun --sdk macosx --show-sdk-path)
 target_dir=$(cargo metadata --format-version 1 --no-deps | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')
@@ -55,10 +55,14 @@ mkdir -p "$work"
 export MACOSX_DEPLOYMENT_TARGET=$min_macos
 
 # 1. The app: Rust for both architectures (the glue is compiled by build.rs), one universal binary.
+# The builder's paths are remapped, so the binary names no home folder.
+RUSTFLAGS="--remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}=/cargo --remap-path-prefix=$root=/build"
+export RUSTFLAGS
 for target in aarch64-apple-darwin x86_64-apple-darwin; do
     rustup target add "$target" >/dev/null 2>&1 || true
     cargo build --target "$target" --release
 done
+unset RUSTFLAGS
 lipo -create "$target_dir/aarch64-apple-darwin/release/$crate" "$target_dir/x86_64-apple-darwin/release/$crate" -output "$work/$crate"
 
 # 2. The engine (Xray-core, ios/engine) for both architectures, and 3. the extension linked with it.
@@ -82,83 +86,7 @@ for arch in arm64 x86_64; do
 done
 lipo -create "$work/connection-arm64" "$work/connection-x86_64" -output "$work/$ext_id"
 
-# 4. Signing inputs: identity, profiles, and the app group the profiles grant.
-if [ "$action" = release ]; then
-    identity="${MAC_IDENTITY:-$(security find-identity -v -p codesigning | grep -m1 'Developer ID Application' | sed -E 's/.*"(.*)"/\1/')}"
-    [ -n "$identity" ] || { echo "no Developer ID Application identity: see the top of this script"; exit 1; }
-else
-    identity="${MAC_IDENTITY:-$(security find-identity -v -p codesigning | grep -m1 'Apple Development' | sed -E 's/.*"(.*)"/\1/')}"
-    [ -n "$identity" ] || { echo "no Apple Development identity"; exit 1; }
-fi
-mac_udid=$(system_profiler SPHardwareDataType | sed -n 's/.*Provisioning UDID: //p' | head -1)
-
-tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
-
-# The newest macOS profile for exactly this id: development ones must list this Mac, Developer ID
-# ones (release) cover every Mac.
-find_profile() {
-    python3 - "$1" "$mac_udid" "$action" <<'PY'
-import glob, os, plistlib, subprocess, sys, datetime
-bundle_id, udid, action, best = sys.argv[1], sys.argv[2], sys.argv[3], None
-folders = ["~/Library/Developer/Xcode/UserData/Provisioning Profiles", "~/Library/MobileDevice/Provisioning Profiles"]
-for path in (p for f in folders for p in glob.glob(os.path.join(os.path.expanduser(f), "*.provisionprofile"))):
-    try:
-        p = plistlib.loads(subprocess.run(["security", "cms", "-D", "-i", path], capture_output=True).stdout)
-    except Exception:
-        continue
-    e, team = p.get("Entitlements", {}), (p.get("TeamIdentifier") or [""])[0]
-    if "OSX" not in p.get("Platform", []) or e.get("com.apple.application-identifier") != f"{team}.{bundle_id}":
-        continue
-    if p["ExpirationDate"] < datetime.datetime.now():
-        continue
-    if action == "release":
-        if not p.get("ProvisionsAllDevices"):
-            continue
-    elif udid not in p.get("ProvisionedDevices", []):
-        continue
-    if best is None or p["CreationDate"] > best[0]:
-        best = (p["CreationDate"], path)
-print(best[1] if best else "")
-PY
-}
-app_profile="${MAC_APP_PROFILE:-$(find_profile "$bundle_id")}"
-ext_profile="${MAC_EXT_PROFILE:-$(find_profile "$ext_id")}"
-[ -n "$app_profile" ] || { echo "no macOS profile for $bundle_id ($action): see the top of this script"; exit 1; }
-[ -n "$ext_profile" ] || { echo "no macOS profile for $ext_id ($action): see the top of this script"; exit 1; }
-
-# Entitlements from a profile: the tunnel (the system extension's kind when the profile has it),
-# the app group, installing the extension (the app), debugging (development).
-entitlements() {
-    security cms -D -i "$1" > "$tmp/profile.plist"
-    python3 - "$tmp/profile.plist" "$2" "$3" <<'PY'
-import plistlib, sys
-p = plistlib.load(open(sys.argv[1], "rb"))
-e, out_path, is_app = p["Entitlements"], sys.argv[2], sys.argv[3] == "app"
-out = {k: e[k] for k in ("com.apple.application-identifier", "com.apple.developer.team-identifier") if k in e}
-kinds = e.get("com.apple.developer.networking.networkextension", [])
-kind = next((k for k in ("packet-tunnel-provider-systemextension", "packet-tunnel-provider") if k in kinds), None)
-if kind is None:
-    sys.exit(f"{sys.argv[1]}: no packet tunnel (Network Extensions capability)")
-out["com.apple.developer.networking.networkextension"] = [kind]
-groups = e.get("com.apple.security.application-groups", [])
-if not groups:
-    sys.exit(f"{sys.argv[1]}: no app group")
-out["com.apple.security.application-groups"] = groups[:1]
-if is_app:
-    if not e.get("com.apple.developer.system-extension.install"):
-        sys.exit(f"{sys.argv[1]}: no System Extension capability")
-    out["com.apple.developer.system-extension.install"] = True
-if e.get("com.apple.security.get-task-allow"):
-    out["com.apple.security.get-task-allow"] = True
-plistlib.dump(out, open(out_path, "wb"))
-print(groups[0])
-PY
-}
-group=$(entitlements "$ext_profile" "$tmp/ext.entitlements" ext)
-entitlements "$app_profile" "$tmp/app.entitlements" app >/dev/null
-
-# 5. The bundle.
+# 4. The bundle. Nothing but code in MacOS/: the notary service reads everything there as code.
 app="$work/$name.app"
 contents="$app/Contents"
 sysext="$contents/Library/SystemExtensions/$ext_id.systemextension"
@@ -166,8 +94,6 @@ rm -rf "$app"
 mkdir -p "$contents/MacOS" "$contents/Resources" "$sysext/Contents/MacOS"
 cp "$work/$crate" "$contents/MacOS/$crate"
 cp -R "$root/assets" "$contents/Resources/assets"
-# DrawnUI reads the app's files next to the executable; the files themselves stay in Resources.
-ln -s ../Resources/assets "$contents/MacOS/assets"
 cp "$work/$ext_id" "$sysext/Contents/MacOS/$ext_id"
 
 # The icon from icon.ico: its largest image at every macOS icon size.
@@ -232,38 +158,119 @@ cat > "$sysext/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-# 6. Signing: the extension first, then the app around it; the hardened runtime (needed for
-# notarization) on both.
-cp "$ext_profile" "$sysext/Contents/embedded.provisionprofile"
-cp "$app_profile" "$contents/embedded.provisionprofile"
-if [ "$action" = release ]; then stamp=--timestamp; else stamp=--timestamp=none; fi
-codesign --force --options runtime $stamp --sign "$identity" --entitlements "$tmp/ext.entitlements" "$sysext"
-codesign --force --options runtime $stamp --sign "$identity" --entitlements "$tmp/app.entitlements" "$app"
-codesign --verify --deep --strict "$app"
-echo "signed: $app"
+# 5. A first, ad-hoc signature with the hardened runtime and the entitlements the bundles need
+# (the tunnel of a system extension, the app group its service name starts with, installing the
+# extension): Xcode's export reads them from it, makes matching profiles and signs again.
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+cat > "$tmp/ext.entitlements" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>com.apple.developer.networking.networkextension</key><array><string>packet-tunnel-provider-systemextension</string></array>
+    <key>com.apple.security.application-groups</key><array><string>$group</string></array>
+</dict>
+</plist>
+PLIST
+cat > "$tmp/app.entitlements" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>com.apple.developer.networking.networkextension</key><array><string>packet-tunnel-provider-systemextension</string></array>
+    <key>com.apple.developer.system-extension.install</key><true/>
+    <key>com.apple.security.application-groups</key><array><string>$group</string></array>
+</dict>
+</plist>
+PLIST
+codesign --force --options runtime --sign - --entitlements "$tmp/ext.entitlements" "$sysext"
+codesign --force --options runtime --sign - --entitlements "$tmp/app.entitlements" "$app"
+echo "built: $app"
+[ "$action" = build ] && exit 0
 
-if [ "$action" = release ]; then
-    [ -n "${MAC_NOTARY_PROFILE:-}" ] || { echo "set MAC_NOTARY_PROFILE (xcrun notarytool store-credentials)"; exit 1; }
-    zip="$work/netconnect-$(echo "$version" | tr -d .)-macos.zip"
-    rm -f "$zip"
-    ditto -c -k --keepParent "$app" "$zip"
-    xcrun notarytool submit "$zip" --keychain-profile "$MAC_NOTARY_PROFILE" --wait
-    xcrun stapler staple "$app"
-    rm -f "$zip"
-    ditto -c -k --keepParent "$app" "$zip"
-    echo "release: $zip"
-    exit 0
+# 6. Developer ID and notarization through Xcode's account: a hand-made archive is all
+# `xcodebuild -exportArchive` needs.
+archive="$work/NetConnect.xcarchive"
+rm -rf "$archive" "$work/uploaded" "$work/notarized"
+mkdir -p "$archive/Products/Applications"
+cp -R "$app" "$archive/Products/Applications/"
+cat > "$archive/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>ArchiveVersion</key><integer>2</integer>
+    <key>Name</key><string>$name</string>
+    <key>SchemeName</key><string>$name</string>
+    <key>CreationDate</key><date>$(date -u +%Y-%m-%dT%H:%M:%SZ)</date>
+    <key>ApplicationProperties</key><dict>
+        <key>ApplicationPath</key><string>Applications/$name.app</string>
+        <key>CFBundleIdentifier</key><string>$bundle_id</string>
+        <key>CFBundleShortVersionString</key><string>$version</string>
+        <key>CFBundleVersion</key><string>$build_number</string>
+    </dict>
+</dict>
+</plist>
+PLIST
+cat > "$tmp/exportOptions.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>method</key><string>developer-id</string>
+    <key>teamID</key><string>$team</string>
+    <key>signingStyle</key><string>automatic</string>
+    <key>destination</key><string>upload</string>
+</dict>
+</plist>
+PLIST
+echo "signing with Developer ID and submitting for notarization"
+if ! xcodebuild -exportArchive -archivePath "$archive" -exportOptionsPlist "$tmp/exportOptions.plist" \
+        -exportPath "$work/uploaded" -allowProvisioningUpdates > "$work/upload.log" 2>&1; then
+    echo "could not sign through the Apple account; see $work/upload.log" >&2
+    exit 1
 fi
-[ "$action" = run ] || exit 0
+release=
+echo "waiting for notarization"
+for _ in $(seq 1 30); do
+    sleep 20
+    rm -rf "$work/notarized"
+    if xcodebuild -exportNotarizedApp -archivePath "$archive" -exportPath "$work/notarized" > "$work/notarize.log" 2>&1; then
+        release="$work/notarized/$name.app"
+        break
+    fi
+    # "Invalid" is Apple's verdict, not a wait: stop and show why.
+    if grep -q 'error: Invalid' "$work/notarize.log"; then
+        echo "notarization was refused; Apple's reasons:" >&2
+        for log in "$archive"/Submissions/*/notarization-log.json; do
+            [ -f "$log" ] && python3 -c 'import json,sys
+d = json.load(open(sys.argv[1]))
+print(" ", d.get("status"), "-", d.get("statusSummary"))
+for i in d.get("issues") or []:
+    print("  -", i.get("severity"), i.get("path", ""), i.get("message"))' "$log" >&2
+        done
+        exit 1
+    fi
+done
+[ -n "$release" ] || { echo "notarization did not finish in time; run again (Apple keeps working on it)" >&2; exit 1; }
+xcrun stapler validate "$release" >/dev/null
+spctl --assess --type execute "$release" >/dev/null
+echo "notarized, stapled, and Gatekeeper accepts it"
 
-# 7. Development: the extension can only be activated from /Applications. A running copy is quit
+zip="$work/netconnect-$(echo "$version" | tr -d .)-macos.zip"
+rm -f "$zip"
+ditto -c -k --keepParent "$release" "$zip"
+echo "release: $zip"
+[ "$action" = release ] && exit 0
+
+# 7. Install: the extension can only be activated from /Applications. A running copy is quit
 # first; the old bundle moves aside before the new one is copied in.
 installed="/Applications/$name.app"
 osascript -e "tell application id \"$bundle_id\" to quit" >/dev/null 2>&1 || true
 if [ -d "$installed" ]; then
-    old="$tmp/old.app"
-    mv "$installed" "$old"
+    mv "$installed" "$tmp/old.app"
 fi
-ditto "$app" "$installed"
+ditto "$release" "$installed"
 open "$installed"
 echo "installed and opened: $installed"

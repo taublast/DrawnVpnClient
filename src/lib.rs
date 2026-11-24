@@ -1055,6 +1055,14 @@ fn language_option(lang: Lang, name: &'static str) -> Build<SkiaShape> {
 }
 
 pub fn run() {
+    // macOS: the app's files are in the bundle's Resources (only code may sit next to the
+    // executable in a notarized app); DrawnUI reads them from the working folder then.
+    #[cfg(target_os = "macos")]
+    if let Some(resources) = std::env::current_exe().ok().and_then(|exe| Some(exe.parent()?.parent()?.join("Resources")))
+        && resources.join("assets").is_dir()
+    {
+        let _ = std::env::set_current_dir(resources);
+    }
     // macOS: a phone-like window (the layout is the phones'); elsewhere the platform's own size.
     #[cfg(target_os = "macos")]
     drawnui::run_sized("Net Connect", 420.0, 860.0, make_ui);
