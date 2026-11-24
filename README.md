@@ -1,6 +1,6 @@
 # VLESS + REALITY VPN client
 
-For Android and iOS.
+For Android, iOS, macOS and Windows.
 
 For now "Net Connect" is a placeholder generic name.
 
