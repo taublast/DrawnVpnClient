@@ -187,6 +187,24 @@ impl Vpn {
             Vpn::NoResponse => t.no_answer,
         }
     }
+    /// The energy core's state weights: idle, connecting, connected, error.
+    fn core_weights(self) -> [f32; 4] {
+        match self {
+            Vpn::Off => [1.0, 0.0, 0.0, 0.0],
+            Vpn::Connecting => [0.0, 1.0, 0.0, 0.0],
+            Vpn::Connected => [0.0, 0.0, 1.0, 0.0],
+            Vpn::Error | Vpn::NoResponse => [0.0, 0.0, 0.0, 1.0],
+        }
+    }
+    /// The power icon on the energy core.
+    fn icon_color(self) -> u32 {
+        match self {
+            Vpn::Off => MUTED,
+            Vpn::Connecting => 0xFCD34D,
+            Vpn::Connected => 0xF0FDF4,
+            Vpn::Error | Vpn::NoResponse => 0xFCA5A5,
+        }
+    }
     /// The tunnel is up or coming up: the big button disconnects.
     fn is_on(self) -> bool {
         matches!(self, Vpn::Connecting | Vpn::Connected | Vpn::NoResponse)
@@ -229,6 +247,14 @@ struct App {
     shell: Handle<SkiaShell>,
     mailbox: Handle<Mailbox>,
     list: Handle<SkiaLayout>,
+    /// The connect button's energy core: the shader layer, the state weights it shows now
+    /// (idle, connecting, connected, error) and its running animations. It draws only while
+    /// something changes: a tween between states, the connecting spin, the error shockwave.
+    core: Handle<SkiaLayout>,
+    core_weights: std::rc::Rc<std::cell::Cell<[f32; 4]>>,
+    core_tween: Option<AnimationId>,
+    core_spin: Option<AnimationId>,
+    core_shock: Option<AnimationId>,
 }
 
 impl App {
@@ -275,7 +301,7 @@ impl App {
         match event {
             Event::State(code, text) => {
                 let was_on = self.vpn.is_on();
-                self.vpn = Vpn::from_code(code);
+                self.set_vpn(Vpn::from_code(code), cx);
                 if self.vpn.is_on() != was_on {
                     // The card of the server in use shows (or stops showing) as selected.
                     cx.items_reset(self.list);
@@ -392,6 +418,62 @@ impl App {
     }
 
     /// The big button: connects the selected server, or disconnects.
+    /// The connection state, and the energy core following it.
+    fn set_vpn(&mut self, vpn: Vpn, cx: &mut Cx) {
+        if vpn == self.vpn {
+            return;
+        }
+        self.vpn = vpn;
+        let core = self.core;
+        // Fade the state weights over 400 ms from what shows now.
+        let from = self.core_weights.get();
+        let to = vpn.core_weights();
+        let weights = self.core_weights.clone();
+        if let Some(a) = self.core_tween.take() {
+            cx.stop_animation(a);
+        }
+        let tween = cx.animate(core, 400.0, easing::cubic_out, move |v, cx| {
+            let w: [f32; 4] = std::array::from_fn(|i| from[i] + (to[i] - from[i]) * v);
+            weights.set(w);
+            if let Some(mut layer) = cx.get_mut(core)
+                && let Some(effect) = layer.effect_mut::<SkiaShaderEffect>()
+            {
+                for (name, value) in ["uIdle", "uBusy", "uOn", "uErr"].into_iter().zip(w) {
+                    effect.set_uniform(name, &[value]);
+                }
+            }
+        });
+        self.core_tween = Some(tween);
+        // The spin runs while connecting and through the fade out of it, then the clock stops.
+        if vpn == Vpn::Connecting {
+            if self.core_spin.is_none() {
+                self.core_spin = Some(cx.animate_shaders(core));
+            }
+        } else if self.core_spin.is_some() {
+            cx.on_finished(tween, |app: &mut App, cx| {
+                if app.vpn != Vpn::Connecting
+                    && let Some(spin) = app.core_spin.take()
+                {
+                    cx.stop_animation(spin);
+                }
+            });
+        }
+        // One shockwave on an error, then a still red rim.
+        if let Some(a) = self.core_shock.take() {
+            cx.stop_animation(a);
+        }
+        if vpn.core_weights()[3] > 0.0 {
+            let shock = cx.animate(core, 1900.0, easing::linear, move |v, cx| {
+                if let Some(mut layer) = cx.get_mut(core)
+                    && let Some(effect) = layer.effect_mut::<SkiaShaderEffect>()
+                {
+                    effect.set_uniform("uErrorAge", &[v * 1.9]);
+                }
+            });
+            self.core_shock = Some(shock);
+        }
+    }
+
     fn toggle(&mut self, cx: &mut Cx) {
         if self.vpn.is_on() {
             self.notice.clear();
@@ -416,7 +498,7 @@ impl App {
         self.notice.clear();
         cx.items_reset(self.list);
         self.save();
-        self.vpn = Vpn::Connecting;
+        self.set_vpn(Vpn::Connecting, cx);
         self.detail.clear();
         platform::connect(config, self.t().vpn_is_on);
     }
@@ -541,7 +623,7 @@ fn main_page(app: &mut App) -> Build<SkiaLayout> {
         .column_definitions("*")
         .padding((20, 12, 20, 16))
         .row_spacing(0)
-        .children((header().row(0), update_banner().row(1), power_button().row(2), status().row(3), servers(app).row(4), actions().row(5)))
+        .children((header().row(0), update_banner().row(1), power_button(app).row(2), status().row(3), servers(app).row(4), actions().row(5)))
 }
 
 /// A round icon button for headers (settings, back).
@@ -636,32 +718,60 @@ fn update_banner() -> Build<SkiaShape> {
         )))
 }
 
-/// The big round button: gray off, amber connecting, green on.
-fn power_button() -> Build<SkiaShape> {
-    hoverable(SkiaShape::new())
-        .shape_type(ShapeType::Circle)
-        .width_request(184)
-        .lock_ratio(1)
+/// The energy core's disc and the square it glows in, points.
+const CORE_DISC: f32 = 184.0;
+const CORE_SIZE: f32 = 240.0;
+
+/// The big round button: the energy core shader (glass when off, a spinning plasma ring while
+/// connecting, a green core when connected, a red rim and one shockwave on an error), with the
+/// power icon and the tap target on top. The shader layer draws only when its uniforms or its
+/// clock change, so a steady state costs nothing.
+fn power_button(app: &mut App) -> Build<SkiaLayout> {
+    let weights = Vpn::Off.core_weights();
+    app.core_weights.set(weights);
+    SkiaLayer::new()
+        .width_request(CORE_SIZE)
+        .height_request(CORE_SIZE)
         .horizontal_options(LayoutOptions::Center)
-        .margin((0, 36, 0, 20))
-        .background_color(rgb(SURFACE))
-        .stroke_width(6)
-        .animation_tapped(SkiaTouchAnimation::Ripple)
-        .accessibility_role(Aria::BUTTON)
-        .observe(|me, app: &App| {
-            me.set_stroke_color(rgb(if app.vpn == Vpn::Off { MUTED } else { app.vpn.color() }));
-            me.set_background_color(shade(SURFACE, app.hovered == Some(me.id())));
-            me.set_accessibility_label(if app.vpn.is_on() { app.t().disconnect } else { app.t().connect });
-        })
-        .on_tapped(|_me, app: &mut App, cx| app.toggle(cx))
-        .children(
-            SkiaLabel::new(ICON_POWER)
-                .font_family("FontIcons")
-                .font_size(84)
-                .center()
+        .margin((0, 8, 0, 0))
+        .children((
+            SkiaLayer::new()
+                .fill()
+                .visual_effect(
+                    SkiaShaderEffect::new()
+                        .shader_code(include_str!("../assets/shaders/energy_core.sksl"))
+                        .use_background(UseBackground::Never)
+                        .uniform("uIdle", &[weights[0]])
+                        .uniform("uBusy", &[weights[1]])
+                        .uniform("uOn", &[weights[2]])
+                        .uniform("uErr", &[weights[3]])
+                        .uniform("uErrorAge", &[2.0])
+                        .uniform("uDisc", &[CORE_DISC / CORE_SIZE]),
+                )
                 .accessibility_role(Aria::PRESENTATION)
-                .observe(|me, app: &App| me.set_text_color(rgb(app.vpn.color()))),
-        )
+                .assign(&mut app.core),
+            hoverable(SkiaShape::new())
+                .shape_type(ShapeType::Circle)
+                .width_request(CORE_DISC)
+                .height_request(CORE_DISC)
+                .center()
+                .animation_tapped(SkiaTouchAnimation::Ripple)
+                .accessibility_role(Aria::BUTTON)
+                .observe(|me, app: &App| {
+                    // Hover: a light wash over the disc.
+                    me.set_background_color(if app.hovered == Some(me.id()) { Color::new(0x14FF_FFFF) } else { Color::TRANSPARENT });
+                    me.set_accessibility_label(if app.vpn.is_on() { app.t().disconnect } else { app.t().connect });
+                })
+                .on_tapped(|_me, app: &mut App, cx| app.toggle(cx))
+                .children(
+                    SkiaLabel::new(ICON_POWER)
+                        .font_family("FontIcons")
+                        .font_size(84)
+                        .center()
+                        .accessibility_role(Aria::PRESENTATION)
+                        .observe(|me, app: &App| me.set_text_color(rgb(app.vpn.icon_color()))),
+                ),
+        ))
 }
 
 fn status() -> Build<SkiaLayout> {

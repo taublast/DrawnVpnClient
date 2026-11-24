@@ -1,0 +1,153 @@
+uniform float2 iResolution;
+uniform float2 iOffset;
+uniform float  iTime;
+uniform float  uIdle;
+uniform float  uBusy;
+uniform float  uOn;
+uniform float  uErr;
+uniform float  uErrorAge;
+uniform float  uDisc;
+
+const float TAU = 6.2831853;
+
+float ring(float r, float inner, float outer, float aa) {
+    return smoothstep(inner - aa, inner + aa, r) * (1.0 - smoothstep(outer - aa, outer + aa, r));
+}
+
+half4 over(half4 dst, float3 rgb, float a) {
+    a = clamp(a, 0.0, 1.0);
+    return half4(half3(rgb * a), half(a)) + dst * half(1.0 - a);
+}
+
+float3 ramp3(float t, float3 c0, float s1, float3 c1, float3 c2) {
+    return t < s1 ? mix(c0, c1, t / s1) : mix(c1, c2, (t - s1) / (1.0 - s1));
+}
+
+float4 busyConic(float a) {
+    float4 c0 = float4(0.0);
+    float4 c1 = float4(0.961, 0.620, 0.043, 1.0);
+    float4 c2 = float4(0.992, 0.902, 0.541, 1.0);
+    float4 c3 = float4(0.133, 0.773, 0.369, 1.0);
+    float d = a * 360.0;
+    if (d < 80.0) return float4(c1.rgb, d / 80.0);
+    if (d < 140.0) return mix(c1, c2, (d - 80.0) / 60.0);
+    if (d < 210.0) return mix(c2, c3, (d - 140.0) / 70.0);
+    if (d < 270.0) return float4(c3.rgb, 1.0 - (d - 210.0) / 60.0);
+    return c0;
+}
+
+float4 onConic(float a) {
+    float3 g = float3(0.133, 0.773, 0.369);
+    float3 teal = float3(0.176, 0.831, 0.749);
+    float3 light = float3(0.525, 0.937, 0.675);
+    float s = a * 6.0;
+    float k = fract(s);
+    float seg = floor(s);
+    if (seg < 1.0) return float4(g, k);
+    if (seg < 2.0) return float4(mix(g, teal, k), 1.0);
+    if (seg < 3.0) return float4(mix(teal, g, k), 1.0 - k);
+    if (seg < 4.0) return float4(g, k);
+    if (seg < 5.0) return float4(mix(g, light, k), 1.0);
+    return float4(mix(light, g, k), 1.0 - k);
+}
+
+half4 main(float2 fragCoord) {
+    float2 local = fragCoord - iOffset;
+    float half_ = 0.5 * min(iResolution.x, iResolution.y);
+    float R = uDisc * half_;
+    float2 p = (local - 0.5 * iResolution) / R;
+    float r = length(p);
+    float aa = 1.0 / R;
+    float reach = 0.98 / uDisc;
+    float span = reach - 1.0;
+    float ro = max(r - 1.0, 0.0) / span;
+
+    float wsum = max(uIdle + uBusy + uOn + uErr, 1e-3);
+    float wI = uIdle / wsum;
+    float wB = uBusy / wsum;
+    float wO = uOn / wsum;
+    float wE = uErr / wsum;
+
+    float ang = fract(atan(p.x, -p.y) / TAU);
+    float t = iTime;
+
+    half4 col = half4(0.0);
+
+    // Connected: aura and core glow around the disc.
+    if (wO > 0.0) {
+        float aura = 0.22 * (1.0 - ro) * (1.0 - ro);
+        float shadow = 0.42 * exp(-ro * ro * 5.0);
+        col = over(col, float3(0.133, 0.773, 0.369), wO * (aura + shadow) * (1.0 - smoothstep(0.85, 1.0, ro)));
+    }
+
+    // Connecting: soft glow of the plasma colors and a ring gathering inward.
+    if (wB > 0.0) {
+        float spin = fract(t / 1.4);
+        float4 g = busyConic(fract(ang - spin));
+        float glow = 0.85 * exp(-ro * ro * 4.0) * (1.0 - smoothstep(0.8, 1.0, ro));
+        col = over(col, g.rgb, wB * g.a * glow);
+
+        float k = spin;
+        float e = k * k;
+        float gr = mix(reach - 0.02, 1.04, e);
+        float fade = k < 0.4 ? k / 0.4 : 1.0 - (k - 0.4) / 0.6;
+        float line = ring(r, gr - 0.011, gr + 0.011, aa);
+        col = over(col, float3(0.961, 0.620, 0.043), wB * 0.5 * 0.9 * fade * line);
+    }
+
+    // Error: one shockwave from the disc edge outward.
+    if (wE > 0.0 && uErrorAge >= 0.0 && uErrorAge < 1.82) {
+        float k = uErrorAge / 1.82;
+        float e = 1.0 - (1.0 - k) * (1.0 - k);
+        float sr = mix(1.0, reach - 0.02, e);
+        float line = ring(r, sr - 0.017, sr + 0.017, aa);
+        float halo = exp(-pow((r - sr) / 0.06, 2.0)) * 0.35;
+        col = over(col, float3(0.937, 0.267, 0.267), wE * 0.95 * (1.0 - k) * max(line, halo));
+    }
+
+    // Rims and plasma rings.
+    float idleA = mix(0.133, 0.6, 0.5 - 0.5 * cos(ang * 2.0 * TAU)) * 0.85;
+    col = over(col, float3(0.541, 0.592, 0.678), wI * idleA * ring(r, 0.977, 1.08, aa));
+
+    float errA = mix(0.4, 0.667, 0.5 - 0.5 * cos(ang * TAU));
+    col = over(col, float3(0.937, 0.267, 0.267), wE * errA * ring(r, 0.977, 1.08, aa));
+
+    float4 bc = busyConic(fract(ang - fract(t / 1.4)));
+    col = over(col, bc.rgb, wB * bc.a * ring(r, 1.012, 1.128, aa));
+
+    float4 oc = onConic(fract(ang - 0.08));
+    col = over(col, oc.rgb, wO * oc.a * ring(r, 0.995, 1.105, aa));
+
+    // The disc.
+    float disc = 1.0 - smoothstep(1.0 - aa, 1.0 + aa, r);
+    if (disc > 0.0) {
+        float tw = length(p - float2(0.0, -0.4)) / 1.72;
+        float3 dIdle = ramp3(tw, float3(0.110, 0.157, 0.251), 0.6, float3(0.067, 0.102, 0.169), float3(0.047, 0.078, 0.133));
+        float3 dBusy = ramp3(tw, float3(0.165, 0.141, 0.086), 0.65, float3(0.090, 0.082, 0.059), float3(0.047, 0.078, 0.133));
+        float3 dErr = ramp3(tw, float3(0.165, 0.102, 0.118), 0.6, float3(0.102, 0.071, 0.094), float3(0.047, 0.078, 0.133));
+
+        float to = length(p - float2(0.0, -0.16)) / 1.533;
+        float3 dOn = to < 0.22 ? mix(float3(0.290, 0.871, 0.502), float3(0.133, 0.773, 0.369), to / 0.22)
+                   : to < 0.52 ? mix(float3(0.133, 0.773, 0.369), float3(0.082, 0.502, 0.239), (to - 0.22) / 0.30)
+                   : to < 0.80 ? mix(float3(0.082, 0.502, 0.239), float3(0.039, 0.227, 0.133), (to - 0.52) / 0.28)
+                   : mix(float3(0.039, 0.227, 0.133), float3(0.043, 0.118, 0.094), (to - 0.80) / 0.20);
+
+        float3 c = dIdle * wI + dBusy * wB + dOn * wO + dErr * wE;
+
+        float inEdge = (1.0 - r) * R;
+        float sc = R / 92.0;
+        float bottom = length(p + float2(0.0, 14.0 / 92.0)) - 1.0;
+        float shade = 0.55 * smoothstep(-0.30, 0.10, bottom) * (wI + wB + wE);
+        c *= 1.0 - shade;
+
+        float rimGlow = exp(-inEdge / (16.0 * sc));
+        c = mix(c, float3(0.961, 0.620, 0.043), 0.25 * rimGlow * wB);
+        c = mix(c, float3(0.937, 0.267, 0.267), 0.25 * rimGlow * wE);
+
+        float top = smoothstep(0.0, 1.0, -p.y) * (1.0 - smoothstep(0.0, 1.5 * sc, inEdge));
+        c = mix(c, float3(1.0), top * (0.07 * (wI + wB + wE) + 0.25 * wO));
+
+        col = over(col, c, disc);
+    }
+    return col;
+}
