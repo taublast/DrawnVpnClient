@@ -2,6 +2,6 @@
 
 VLESS + REALITY VPN client for Android and iOS.
 
-A white-label client: "Net Connect" is a placeholder name, to be replaced by your own brand.
+A white-label app: for now "Net Connect" is a placeholder generic name.
 
 Downloads: [latest release](https://github.com/taublast/DrawnVpnClient/releases/latest)
