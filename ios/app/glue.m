@@ -34,6 +34,17 @@ void nc_free(char *text) { free(text); }
 #if TARGET_OS_OSX
 /// macOS: the tunnel is a system extension inside the app, which the system installs on request
 /// (asking the user once in System Settings) before any configuration can use it.
+/// The extension waits for the user to turn it on (System Settings).
+static BOOL approvalPending;
+
+/// Where the user turns the extension on: General > Login Items & Extensions; and the app's own
+/// line saying so ("extension").
+static void askForApproval(void) {
+    approvalPending = YES;
+    emit(3, @"extension");
+    [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:@"x-apple.systempreferences:com.apple.LoginItems-Settings.extension"]];
+}
+
 @interface NCExtensionActivator : NSObject <OSSystemExtensionRequestDelegate>
 @property (copy) void (^done)(NSError *error);
 @end
@@ -45,10 +56,8 @@ void nc_free(char *text) { free(text); }
     return OSSystemExtensionReplacementActionReplace;
 }
 - (void)requestNeedsUserApproval:(OSSystemExtensionRequest *)request {
-    // The request goes on by itself once the user turns the extension on. Meanwhile the app says
-    // where ("extension": its own text) and opens that page: General > Login Items & Extensions.
-    emit(3, @"extension");
-    [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:@"x-apple.systempreferences:com.apple.LoginItems-Settings.extension"]];
+    // The request goes on by itself once the user turns the extension on.
+    dispatch_async(dispatch_get_main_queue(), ^{ askForApproval(); });
 }
 - (void)request:(OSSystemExtensionRequest *)request didFinishWithResult:(OSSystemExtensionRequestResult)result {
     if (result == OSSystemExtensionRequestWillCompleteAfterReboot) {
@@ -66,9 +75,13 @@ static NCExtensionActivator *activator;
 
 /// Installs (or updates) the extension, then runs `then` on the main queue.
 static void activateExtension(void (^then)(void)) {
+    // Still off since an earlier press (the user closed the system's alert with OK): every press
+    // of Connect opens the settings page again, not only the first.
+    if (approvalPending) askForApproval();
     activator = [NCExtensionActivator new];
     activator.done = ^(NSError *error) {
         dispatch_async(dispatch_get_main_queue(), ^{
+            approvalPending = NO;
             if (error) {
                 emit(3, error.localizedDescription);
             } else {
