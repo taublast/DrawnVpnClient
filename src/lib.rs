@@ -98,6 +98,10 @@ const RELEASE_ASSET: &str = "-windows-x64.zip";
 const UPDATES: bool = !cfg!(target_os = "ios");
 const UPDATE_CHECK_EVERY: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
 
+/// The height of every control (buttons, fields, switch rows, menu lines), points: one size
+/// everywhere, big enough for a finger.
+const CONTROL_HEIGHT: f32 = 50.0;
+
 fn rgb(v: u32) -> Color {
     Color::new(0xFF00_0000 | v)
 }
@@ -577,7 +581,7 @@ fn update_banner() -> Build<SkiaShape> {
     let button = |text: fn(&Texts) -> &'static str, color: u32, download: bool| {
         hoverable(SkiaShape::new())
             .corner_radius(10)
-            .height_request(38)
+            .height_request(CONTROL_HEIGHT)
             .fill_x()
             .background_color(rgb(color))
             .animation_tapped(SkiaTouchAnimation::Ripple)
@@ -791,8 +795,8 @@ fn import_button() -> Build<SkiaShape> {
 /// caption. Outline only: these are used rarely, the connection is what the screens are about.
 fn pill_button(icon: &'static str, caption: fn(&App) -> &'static str) -> Build<SkiaShape> {
     hoverable(SkiaShape::new())
-        .corner_radius(22)
-        .height_request(44)
+        .corner_radius(CONTROL_HEIGHT / 2.0)
+        .height_request(CONTROL_HEIGHT)
         .horizontal_options(LayoutOptions::Center)
         .stroke_color(rgb(MUTED))
         .stroke_width(1.5)
@@ -825,7 +829,7 @@ fn entry_dialog(app: &mut App) -> Build<SkiaLayout> {
     let button = |text: &'static str, color: u32, add: bool| {
         hoverable(SkiaShape::new())
             .corner_radius(10)
-            .height_request(44)
+            .height_request(CONTROL_HEIGHT)
             .fill_x()
             .background_color(rgb(color))
             .animation_tapped(SkiaTouchAnimation::Ripple)
@@ -951,7 +955,7 @@ fn server_menu(app: &App, index: usize) -> Build<SkiaShape> {
 fn menu_item(icon: &'static str, text: &'static str, color: u32, action: fn(&mut App, usize, &mut Cx)) -> Build<SkiaLayout> {
     hoverable(SkiaRow::new())
         .fill_x()
-        .height_request(48)
+        .height_request(CONTROL_HEIGHT)
         .padding((16, 0))
         .spacing(14)
         .animation_tapped(SkiaTouchAnimation::Ripple)
@@ -990,7 +994,7 @@ fn delete_question(app: &App, index: usize) -> Build<SkiaShape> {
     let button = |text: &'static str, color: u32, delete: bool| {
         hoverable(SkiaShape::new())
             .corner_radius(10)
-            .height_request(40)
+            .height_request(CONTROL_HEIGHT)
             .fill_x()
             .background_color(rgb(color))
             .animation_tapped(SkiaTouchAnimation::Ripple)
@@ -1059,8 +1063,9 @@ fn settings_page(app: &mut App) -> Build<SkiaLayout> {
             .background_color(rgb(SURFACE))
             .stroke_color(rgb(LINE))
             .stroke_width(2)
+            .height_request(CONTROL_HEIGHT)
             .observe(|me, _app: &App| me.set_is_visible(UPDATES))
-            .children(SkiaLayer::new().fill_x().padding((16, 10)).children((
+            .children(SkiaLayer::new().fill().padding((16, 0)).children((
                 SkiaLabel::new("")
                     .font_size(16)
                     .text_color(rgb(TEXT))
@@ -1108,6 +1113,7 @@ fn language_name(app: &App, lang: Lang) -> &'static str {
 /// a tap opens the list under it. It stays one row however many languages there are.
 fn language_field() -> Build<SkiaShape> {
     card()
+        .height_request(CONTROL_HEIGHT)
         .observe(|me, app: &App| {
             style_card(me, false, app.hovered == Some(me.id()));
             me.set_accessibility_label(format!("{}: {}", app.t().language_label, language_name(app, app.lang)));
@@ -1117,7 +1123,7 @@ fn language_field() -> Build<SkiaShape> {
             let options = PopupWindowOptions { cpu: true, ..PopupWindowOptions::default() };
             app.popup = Some(cx.open_popup_window(language_menu(app), me.id(), options));
         })
-        .children(SkiaLayer::new().fill_x().padding((16, 14)).children((
+        .children(SkiaLayer::new().fill().padding((16, 0)).children((
             SkiaLabel::new("")
                 .font_size(16)
                 .text_color(rgb(TEXT))
@@ -1147,7 +1153,7 @@ fn language_menu(_app: &App) -> Build<SkiaShape> {
 fn language_row(lang: Lang) -> Build<SkiaLayout> {
     hoverable(SkiaRow::new())
         .fill_x()
-        .height_request(48)
+        .height_request(CONTROL_HEIGHT)
         .padding((16, 0))
         .spacing(14)
         .animation_tapped(SkiaTouchAnimation::Ripple)
