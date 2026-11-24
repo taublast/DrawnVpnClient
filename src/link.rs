@@ -121,7 +121,7 @@ impl Server {
                 "tag": "tun",
                 "port": 0,
                 "protocol": "tun",
-                "settings": { "name": "xray0", "MTU": 1500 },
+                "settings": tun_settings(),
                 "sniffing": { "enabled": true, "destOverride": ["http", "tls", "quic"] }
             }],
             "outbounds": [
@@ -137,6 +137,22 @@ impl Server {
         })
         .to_string()
     }
+}
+
+/// The TUN inbound's settings. Phones and Macs hand Xray the system VPN's file descriptor; on
+/// Windows Xray makes the adapter itself (Wintun) and sets the routes, the DNS and the leak filters.
+fn tun_settings() -> Value {
+    #[cfg(windows)]
+    return json!({
+        "name": "Net Connect",
+        "MTU": 1500,
+        "gateway": ["10.10.14.1/30", "fd66:7665:7373::1/126"],
+        "dns": ["1.1.1.1"],
+        "autoSystemRoutingTable": ["0.0.0.0/0", "::/0"],
+        "autoSystemWfpBlockLeak": ["dns", "misconfigtun"]
+    });
+    #[cfg(not(windows))]
+    json!({ "name": "xray0", "MTU": 1500 })
 }
 
 /// Percent-decoding (%2F, + stays +).

@@ -13,6 +13,10 @@ serde_json = "1"
 # Calls into the Java side (VPN service, clipboard) and back.
 jni = "0.21"
 
+[target.'cfg(windows)'.dependencies]
+# Win32 for the tunnel helper (UAC start, events, job object), the clipboard and the locale.
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Threading", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_System_Registry", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_Globalization", "Win32_System_JobObjects"] }
+
 [build-dependencies]
 embed-resource = "3"
 

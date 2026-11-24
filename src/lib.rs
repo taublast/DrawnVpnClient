@@ -12,7 +12,16 @@ use android as platform;
 mod apple;
 #[cfg(any(target_os = "ios", target_os = "macos"))]
 use apple as platform;
-#[cfg(not(any(target_os = "android", target_os = "ios", target_os = "macos")))]
+#[cfg(windows)]
+mod win;
+#[cfg(windows)]
+use win as platform;
+/// Windows: the elevated tunnel helper (`--tunnel ...`), started by the app itself on Connect.
+#[cfg(windows)]
+pub fn tunnel_helper(args: &[String]) -> i32 {
+    win::tunnel_helper(args)
+}
+#[cfg(not(any(target_os = "android", target_os = "ios", target_os = "macos", windows)))]
 mod platform {
     //! Desktop: the UI runs, there is no tunnel.
     use super::Event;
@@ -73,13 +82,16 @@ const ROUTE_SETTINGS: &str = "settings";
 const RELEASES: &str = "https://api.github.com/repos/taublast/DrawnVpnClient/releases?per_page=20";
 /// The release file for this build's phones, short to type and share: netconnect-010-arm64.apk and
 /// netconnect-010-armv7.apk for 0.1.0.
-#[cfg(all(not(target_arch = "arm"), not(target_os = "macos")))]
+#[cfg(all(not(target_arch = "arm"), not(target_os = "macos"), not(windows)))]
 const RELEASE_ASSET: &str = "-arm64.apk";
 #[cfg(target_arch = "arm")]
 const RELEASE_ASSET: &str = "-armv7.apk";
 /// macOS: one universal app, netconnect-012-macos.zip for 0.1.2.
 #[cfg(target_os = "macos")]
 const RELEASE_ASSET: &str = "-macos.zip";
+/// Windows: netconnect-013-windows-x64.zip for 0.1.3.
+#[cfg(windows)]
+const RELEASE_ASSET: &str = "-windows-x64.zip";
 /// iOS installs come through TestFlight or Ad Hoc: no update check there, and no Settings section.
 const UPDATES: bool = !cfg!(target_os = "ios");
 const UPDATE_CHECK_EVERY: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
@@ -1086,9 +1098,9 @@ pub fn run() {
         let _ = std::env::set_current_dir(resources);
     }
     // macOS: a phone-like window (the layout is the phones'); elsewhere the platform's own size.
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     drawnui::run_sized("Net Connect", 420.0, 860.0, make_ui);
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", windows)))]
     drawnui::run("Net Connect", make_ui);
 }
 
