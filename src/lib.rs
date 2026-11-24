@@ -243,10 +243,15 @@ impl App {
         }
     }
 
-    fn on_event(&mut self, event: Event, _cx: &mut Cx) {
+    fn on_event(&mut self, event: Event, cx: &mut Cx) {
         match event {
             Event::State(code, text) => {
+                let was_on = self.vpn.is_on();
                 self.vpn = Vpn::from_code(code);
+                if self.vpn.is_on() != was_on {
+                    // The card of the server in use shows (or stops showing) as selected.
+                    cx.items_reset(self.list);
+                }
                 self.detail = text;
                 self.testing = false;
                 // Sent at start and whenever the app comes back to the screen.
@@ -317,6 +322,12 @@ impl App {
     /// The server at `index` is the one the tunnel runs through.
     fn is_connected_to(&self, index: usize) -> bool {
         self.vpn.is_on() && index == self.selected
+    }
+
+    /// A card shows as selected only for the server in use (connecting or connected) and while
+    /// its menu is open; with nothing connected no card is marked.
+    fn highlighted(&self, index: usize) -> bool {
+        self.is_connected_to(index) || (self.popup.is_some() && self.menu_for.map(|(menu, _)| menu) == Some(index))
     }
 
     fn delete(&mut self, index: usize, cx: &mut Cx) {
@@ -429,6 +440,7 @@ impl App {
     fn close_popup(&mut self, cx: &mut Cx) {
         if let Some(popup) = self.popup.take() {
             cx.close_popup_window(popup);
+            cx.items_reset(self.list);
         }
     }
 }
@@ -663,7 +675,7 @@ fn server_cell() -> (Build<SkiaShape>, CellHandles) {
             } else if app.hovered == Some(id) {
                 app.hovered = None;
             }
-            let selected = me.base().context_index == Some(app.selected);
+            let selected = me.base().context_index.is_some_and(|index| app.highlighted(index));
             style_card(me, selected, on);
         })
         .on_tapped(|me, app: &mut App, cx| {
@@ -671,6 +683,8 @@ fn server_cell() -> (Build<SkiaShape>, CellHandles) {
             app.close_popup(cx);
             app.menu_for = Some((index, me.id()));
             app.popup = Some(cx.open_popup_window(server_menu(app, index), me.id(), PopupWindowOptions::default()));
+            // The card whose menu is open shows as selected.
+            cx.items_reset(app.list);
         })
         .children(SkiaStack::new().spacing(3).padding((16, 12)).children((
             SkiaLabel::new("").font_family("FontTextBold").font_size(16).text_color(rgb(TEXT)).max_lines(1).assign(&mut h.name),
@@ -685,7 +699,7 @@ fn bind_server(h: &CellHandles, app: &App, index: usize, cx: &mut Cx) {
     let selected = index == app.selected;
     if let Some(mut card) = cx.get_mut(h.card) {
         let hovered = app.hovered == Some(h.card.id());
-        style_card(&mut card, selected, hovered);
+        style_card(&mut card, app.highlighted(index), hovered);
         card.set_accessibility_label(if selected { format!("{}, {}", server.name, t.selected) } else { server.name.clone() });
     }
     if let Some(mut name) = cx.get_mut(h.name) {
@@ -1081,6 +1095,13 @@ fn make_ui() -> Box<dyn drawnui::App> {
             ..SkiaShell::defaults()
         });
         let ui = Ui::new(App::load(), build)
+            // A menu closed by a press outside or Escape: its card stops showing as selected.
+            .on_popup_window_closed(|app: &mut App, popup, cx| {
+                if app.popup == Some(popup) {
+                    app.popup = None;
+                    cx.items_reset(app.list);
+                }
+            })
             .font("FontText", "assets/fonts/OpenSans-Regular.ttf")
             .font_weight("FontText", "assets/fonts/OpenSans-Semibold.ttf", 600)
             .font("FontTextBold", "assets/fonts/OpenSans-Semibold.ttf")
