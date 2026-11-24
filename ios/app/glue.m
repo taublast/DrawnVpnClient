@@ -38,11 +38,8 @@ void nc_free(char *text) { free(text); }
 static BOOL approvalPending;
 
 /// Where the user turns the extension on: the Network Extensions sheet of General > Login Items &
-/// Extensions, opened directly with its switch for Net Connect; and the app's own line saying so
-/// ("extension").
-static void askForApproval(void) {
-    approvalPending = YES;
-    emit(3, @"extension");
+/// Extensions, opened directly with its switch for Net Connect.
+static void openExtensionSettings(void) {
     [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:
         @"x-apple.systempreferences:com.apple.ExtensionsPreferences?extensionPointIdentifier=com.apple.system_extension.network_extension.extension-point"]];
 }
@@ -58,8 +55,12 @@ static void askForApproval(void) {
     return OSSystemExtensionReplacementActionReplace;
 }
 - (void)requestNeedsUserApproval:(OSSystemExtensionRequest *)request {
-    // The request goes on by itself once the user turns the extension on.
-    dispatch_async(dispatch_get_main_queue(), ^{ askForApproval(); });
+    // macOS shows its own alert now (with a button to its settings); the app only says where
+    // ("extension", its own text). The request goes on by itself once the user turns it on.
+    dispatch_async(dispatch_get_main_queue(), ^{
+        approvalPending = YES;
+        emit(3, @"extension");
+    });
 }
 - (void)request:(OSSystemExtensionRequest *)request didFinishWithResult:(OSSystemExtensionRequestResult)result {
     if (result == OSSystemExtensionRequestWillCompleteAfterReboot) {
@@ -77,9 +78,12 @@ static NCExtensionActivator *activator;
 
 /// Installs (or updates) the extension, then runs `then` on the main queue.
 static void activateExtension(void (^then)(void)) {
-    // Still off since an earlier press (the user closed the system's alert with OK): every press
-    // of Connect opens the settings page again, not only the first.
-    if (approvalPending) askForApproval();
+    // Still off since an earlier press (the user closed the system's alert with OK): each further
+    // press of Connect opens the settings sheet itself; the first press leaves it to macOS's alert.
+    if (approvalPending) {
+        emit(3, @"extension");
+        openExtensionSettings();
+    }
     activator = [NCExtensionActivator new];
     activator.done = ^(NSError *error) {
         dispatch_async(dispatch_get_main_queue(), ^{
