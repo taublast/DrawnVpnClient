@@ -13,6 +13,12 @@ fn main() {
     if target == "emscripten" || target == "android" {
         return;
     }
+    if target == "ios" {
+        // The iOS side (ios/app/glue.m), compiled with Xcode's clang and linked into the app.
+        // The bundle with its assets is made by ios/ios.sh.
+        ios_glue(&env::var("OUT_DIR").unwrap());
+        return;
+    }
     if target == "windows" {
         embed_resource::compile("app.rc", embed_resource::NONE).manifest_optional().unwrap();
     }
@@ -34,5 +40,28 @@ fn copy_folder(from: &Path, to: &Path) {
         } else {
             fs::copy(&source, &target).unwrap();
         }
+    }
+}
+
+fn ios_glue(out: &str) {
+    use std::process::Command;
+    println!("cargo:rerun-if-changed=ios/app/glue.m");
+    let sim = env::var("TARGET").unwrap_or_default().ends_with("-sim");
+    let (sdk, target) = if sim { ("iphonesimulator", "arm64-apple-ios14.0-simulator") } else { ("iphoneos", "arm64-apple-ios14.0") };
+    let object = Path::new(out).join("glue.o");
+    let library = Path::new(out).join("libnetconnectglue.a");
+    let ok = Command::new("xcrun")
+        .args(["--sdk", sdk, "clang", "-c", "-fobjc-arc", "-O2", "-target", target, "ios/app/glue.m", "-o"])
+        .arg(&object)
+        .status()
+        .is_ok_and(|s| s.success());
+    assert!(ok, "clang failed on ios/app/glue.m");
+    let _ = fs::remove_file(&library);
+    let ok = Command::new("xcrun").args(["ar", "rcs"]).arg(&library).arg(&object).status().is_ok_and(|s| s.success());
+    assert!(ok, "ar failed");
+    println!("cargo:rustc-link-search=native={out}");
+    println!("cargo:rustc-link-lib=static=netconnectglue");
+    for framework in ["NetworkExtension", "UIKit", "Foundation"] {
+        println!("cargo:rustc-link-lib=framework={framework}");
     }
 }
