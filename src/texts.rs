@@ -96,6 +96,8 @@ pub struct Texts {
     pub up_to_date: &'static str,
     pub update_check_failed: &'static str,
     pub version: &'static str,
+    pub built_with: &'static str,
+    pub report_issue: &'static str,
 }
 
 impl Texts {
@@ -160,6 +162,8 @@ pub static EN: Texts = Texts {
     up_to_date: "You have the latest version",
     update_check_failed: "Could not check for updates",
     version: "Version",
+    built_with: "Built with",
+    report_issue: "Report an issue",
 };
 
 pub static RU: Texts = Texts {
@@ -217,4 +221,6 @@ pub static RU: Texts = Texts {
     up_to_date: "У вас последняя версия",
     update_check_failed: "Не удалось проверить обновления",
     version: "Версия",
+    built_with: "Сделано на",
+    report_issue: "Сообщить о проблеме",
 };

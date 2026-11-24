@@ -77,6 +77,11 @@ const ICON_SHIELD: &str = "\u{e32a}";
 const ICON_SETTINGS: &str = "\u{e8b8}";
 const ICON_BACK: &str = "\u{e5c4}";
 const ICON_CHECK: &str = "\u{e5ca}";
+const ICON_OPEN: &str = "\u{e89e}";
+const ICON_CODE: &str = "\u{e86f}";
+const ICON_BUG: &str = "\u{e868}";
+
+const REPO: &str = "https://github.com/taublast/DrawnVpnClient";
 
 const ROUTE_SETTINGS: &str = "settings";
 
@@ -1204,16 +1209,54 @@ fn settings_page(app: &mut App) -> Build<SkiaLayout> {
             .observe(|me, _app: &App| me.set_is_visible(UPDATES))
             .on_tapped(|_me, app: &mut App, _cx| app.check_now()),
         section_title().margin((0, 16, 0, 0)).observe(|me, app: &App| me.set_text(app.t().about)),
-        SkiaLabel::new("").font_size(14).text_color(rgb(MUTED)).fill_x().observe(|me, app: &App| {
-            let mut text = format!("{} {}", app.t().version, env!("CARGO_PKG_VERSION"));
-            if !app.core_version.is_empty() {
-                // "Lib v40, Xray-core v26.11.9": the engine's version is what matters.
-                let core = app.core_version.rsplit(", ").next().unwrap_or(&app.core_version).replace(" v", " ");
-                text.push_str(&format!("\n{core}"));
-            }
-            me.set_text(text);
-        }),
+        SkiaLabel::new("")
+            .font_size(14)
+            .text_color(rgb(MUTED))
+            .fill_x()
+            .observe(|me, app: &App| me.set_text(format!("{} {}", app.t().version, env!("CARGO_PKG_VERSION")))),
+        // "Lib v40, Xray-core v26.11.9": the engine's version is what matters.
+        link(|app| format!("{}", app.core_version.rsplit(", ").next().unwrap_or(&app.core_version).replace(" v", " ")), "https://github.com/XTLS/Xray-core")
+            .observe(|me, app: &App| me.set_is_visible(!app.core_version.is_empty())),
+        link(|app| format!("{} DrawnUI for Rust", app.t().built_with), "https://github.com/DrawnUi/DrawnUi.Rust"),
+        SkiaRow::new().spacing(10).horizontal_options(LayoutOptions::Center).margin((0, 12, 0, 0)).children((
+            pill_button(ICON_CODE, |_| "GitHub").on_tapped(|_me, _app: &mut App, _cx| platform::open_url(REPO)),
+            pill_button(ICON_BUG, |app| app.t().report_issue).on_tapped(|_me, _app: &mut App, _cx| platform::open_url(&format!("{REPO}/issues/new"))),
+        )),
     ))
+}
+
+/// A line of the About section that opens a web page: accent colored with an open-link icon,
+/// lighter under the mouse.
+fn link(text: fn(&App) -> String, url: &'static str) -> Build<SkiaLayout> {
+    // The labels color themselves from the row's hover: the row's id is known once it is built.
+    let row = std::rc::Rc::new(std::cell::Cell::new(None));
+    let (row_text, row_icon) = (row.clone(), row.clone());
+    let color = move |app: &App, row: &std::cell::Cell<Option<ControlId>>| shade(ACCENT, row.get().is_some() && app.hovered == row.get());
+    hoverable(SkiaRow::new())
+        .spacing(4)
+        .padding((0, 4))
+        .accessibility_role(Aria::LINK)
+        .observe(move |me, app: &App| {
+            row.set(Some(me.id()));
+            me.set_accessibility_label(text(app));
+        })
+        .on_tapped(move |_me, _app: &mut App, _cx| platform::open_url(url))
+        .children((
+            SkiaLabel::new("")
+                .font_size(14)
+                .vertical_options(LayoutOptions::Center)
+                .accessibility_role(Aria::PRESENTATION)
+                .observe(move |me, app: &App| {
+                    me.set_text(text(app));
+                    me.set_text_color(color(app, &row_text));
+                }),
+            SkiaLabel::new(ICON_OPEN)
+                .font_family("FontIcons")
+                .font_size(15)
+                .vertical_options(LayoutOptions::Center)
+                .accessibility_role(Aria::PRESENTATION)
+                .observe(move |me, app: &App| me.set_text_color(color(app, &row_icon))),
+        ))
 }
 
 /// A language's own name ("Phone language" in the app's language).
