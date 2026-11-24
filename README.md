@@ -1,3 +1,5 @@
+<img src="docs/banner.png" alt="Net Connect, a VLESS + REALITY client for Android, iPhone, Mac and Windows: the connect button glowing green, connected">
+
 # VLESS + REALITY VPN client
 
 For Android, iOS, macOS and Windows.
