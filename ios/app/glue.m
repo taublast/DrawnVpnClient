@@ -14,6 +14,8 @@ static NETunnelProviderManager *manager;
 static id observer;
 static NEVPNStatus lastStatus = NEVPNStatusInvalid;
 static BOOL stopping;
+/// A configuration to start once the running tunnel is down (a switch of server while connected).
+static NSString *pendingConfig;
 
 static void emit(int kind, NSString *text) { nc_event(kind, (text ?: @"").UTF8String); }
 
@@ -36,6 +38,13 @@ void nc_test(void) {
     if (!sent) emit(4, error.localizedDescription);
 }
 
+static void startTunnel(NETunnelProviderManager *m, NSString *config) {
+    stopping = NO;
+    NSError *startError = nil;
+    [(NETunnelProviderSession *)m.connection startTunnelWithOptions:@{@"config": config} andReturnError:&startError];
+    if (startError) emit(3, startError.localizedDescription);
+}
+
 static void statusChanged(void) {
     NEVPNConnection *connection = manager.connection;
     NEVPNStatus status = connection ? connection.status : NEVPNStatusInvalid;
@@ -55,6 +64,14 @@ static void statusChanged(void) {
         case NEVPNStatusInvalid:
         case NEVPNStatusDisconnected:
         default: {
+            if (pendingConfig) {
+                // The old tunnel is down: the new server's starts now.
+                NSString *config = pendingConfig;
+                pendingConfig = nil;
+                emit(1, @"Connecting");
+                startTunnel(manager, config);
+                break;
+            }
             BOOL failed = !stopping && (before == NEVPNStatusConnecting || before == NEVPNStatusReasserting);
             stopping = NO;
             if (failed) {
@@ -130,10 +147,17 @@ void nc_connect(const char *config_utf8) {
             [m loadFromPreferencesWithCompletionHandler:^(NSError *reloadError) {
                 dispatch_async(dispatch_get_main_queue(), ^{
                     watch(m);
-                    stopping = NO;
-                    NSError *startError = nil;
-                    [(NETunnelProviderSession *)m.connection startTunnelWithOptions:@{@"config": config} andReturnError:&startError];
-                    if (startError) emit(3, startError.localizedDescription);
+                    NEVPNStatus status = m.connection.status;
+                    if (status == NEVPNStatusConnected || status == NEVPNStatusConnecting ||
+                        status == NEVPNStatusReasserting || status == NEVPNStatusDisconnecting) {
+                        // Another server is up (a switch): a running tunnel ignores a start, so it
+                        // stops first and the new one starts once it is down (statusChanged).
+                        pendingConfig = config;
+                        stopping = YES;
+                        if (status != NEVPNStatusDisconnecting) [m.connection stopVPNTunnel];
+                    } else {
+                        startTunnel(m, config);
+                    }
                 });
             }];
         }];
@@ -147,6 +171,7 @@ void nc_disconnect(void) {
             return;
         }
         stopping = YES;
+        pendingConfig = nil;
         [manager.connection stopVPNTunnel];
     });
 }
