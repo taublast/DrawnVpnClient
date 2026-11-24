@@ -1,5 +1,5 @@
 # Net Connect
 
-A network client for Android. iPhone version coming.
+VLESS + REALITY VPN client for Android and iOS.
 
 Downloads: [latest release](https://github.com/taublast/DrawnVpnClient/releases/latest)
