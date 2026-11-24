@@ -3,3 +3,4 @@
 /android/local.properties
 /android/libs/*.aar
 /android/keystore.properties
+/ios/signing.properties

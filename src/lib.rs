@@ -8,7 +8,11 @@ mod update;
 mod android;
 #[cfg(target_os = "android")]
 use android as platform;
-#[cfg(not(target_os = "android"))]
+#[cfg(target_os = "ios")]
+mod ios;
+#[cfg(target_os = "ios")]
+use ios as platform;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod platform {
     //! Desktop: the UI runs, there is no tunnel.
     use super::Event;
@@ -73,6 +77,8 @@ const RELEASES: &str = "https://api.github.com/repos/taublast/DrawnVpnClient/rel
 const RELEASE_ASSET: &str = "-arm64.apk";
 #[cfg(target_arch = "arm")]
 const RELEASE_ASSET: &str = "-armv7.apk";
+/// iOS installs come through TestFlight or Ad Hoc: no update check there, and no Settings section.
+const UPDATES: bool = !cfg!(target_os = "ios");
 const UPDATE_CHECK_EVERY: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
 
 fn rgb(v: u32) -> Color {
@@ -169,7 +175,7 @@ impl App {
     }
 
     fn load() -> App {
-        let mut app = App { system_lang: platform::system_language(), check_updates: true, ..App::default() };
+        let mut app = App { system_lang: platform::system_language(), check_updates: UPDATES, ..App::default() };
         let Some(dir) = platform::data_dir() else { return app };
         if let Ok(text) = std::fs::read_to_string(dir.join("servers.txt")) {
             let mut lines = text.lines();
@@ -181,7 +187,7 @@ impl App {
         for line in std::fs::read_to_string(dir.join("settings.txt")).unwrap_or_default().lines() {
             match line.split_once('=') {
                 Some(("lang", v)) => app.lang = Lang::from_code(v.trim()),
-                Some(("updates", v)) => app.check_updates = v.trim() != "0",
+                Some(("updates", v)) => app.check_updates = UPDATES && v.trim() != "0",
                 Some(("skip", v)) => app.skipped_update = v.trim().to_owned(),
                 _ => {}
             }
@@ -911,13 +917,17 @@ fn settings_page(app: &mut App) -> Build<SkiaLayout> {
             .spacing(8)
             .accessibility_role(Aria::RADIO_GROUP)
             .children(LANGUAGES.into_iter().map(|(lang, name)| language_option(lang, name)).collect::<Vec<_>>()),
-        section_title().margin((0, 16, 0, 0)).observe(|me, app: &App| me.set_text(app.t().updates)),
+        section_title().margin((0, 16, 0, 0)).observe(|me, app: &App| {
+            me.set_text(app.t().updates);
+            me.set_is_visible(UPDATES);
+        }),
         SkiaShape::new()
             .corner_radius(14)
             .fill_x()
             .background_color(rgb(SURFACE))
             .stroke_color(rgb(LINE))
             .stroke_width(2)
+            .observe(|me, _app: &App| me.set_is_visible(UPDATES))
             .children(SkiaLayer::new().fill_x().padding((16, 10)).children((
                 SkiaLabel::new("")
                     .font_size(16)
