@@ -122,6 +122,9 @@ pub enum Event {
     State(i32, String),
     /// The answer of `platform::fetch`, "" when it failed.
     Fetched(String),
+    /// macOS: Connect / Disconnect from the menu bar icon.
+    #[cfg(target_os = "macos")]
+    Toggle,
 }
 
 #[derive(Clone, Copy, PartialEq, Default)]
@@ -258,6 +261,8 @@ impl App {
                 self.check_for_updates();
             }
             Event::Fetched(json) => self.update = update::newer(&json, env!("CARGO_PKG_VERSION"), RELEASE_ASSET),
+            #[cfg(target_os = "macos")]
+            Event::Toggle => self.toggle(cx),
         }
     }
 
@@ -387,6 +392,8 @@ impl App {
 
     fn set_language(&mut self, lang: Lang, cx: &mut Cx) {
         self.lang = lang;
+        #[cfg(target_os = "macos")]
+        platform::menu_texts(self.t());
         // Messages were written in the old language.
         self.notice.clear();
         cx.items_reset(self.list);
@@ -1094,7 +1101,10 @@ fn make_ui() -> Box<dyn drawnui::App> {
             toast_text_font: "FontText".into(),
             ..SkiaShell::defaults()
         });
-        let ui = Ui::new(App::load(), build)
+        let app = App::load();
+        #[cfg(target_os = "macos")]
+        platform::menu_texts(app.t());
+        let ui = Ui::new(app, build)
             // A menu closed by a press outside or Escape: its card stops showing as selected.
             .on_popup_window_closed(|app: &mut App, popup, cx| {
                 if app.popup == Some(popup) {

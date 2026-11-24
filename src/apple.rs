@@ -25,6 +25,8 @@ unsafe extern "C" {
     fn nc_free(text: *mut c_char);
     #[cfg(target_os = "macos")]
     fn nc_fetch(url: *const c_char);
+    #[cfg(target_os = "macos")]
+    fn nc_menu_texts(texts: *const *const c_char, count: c_int);
 }
 
 fn c(text: &str) -> CString {
@@ -93,6 +95,18 @@ pub fn fetch(url: &str) {
 
 /// The event kind of a fetched text (Android's MainActivity.EVENT_FETCHED); 0..4 are tunnel states.
 const EVENT_FETCHED: c_int = 11;
+/// macOS: Connect / Disconnect picked in the menu bar icon's menu.
+#[cfg(target_os = "macos")]
+const EVENT_TOGGLE: c_int = 12;
+
+/// macOS: the menu bar icon's texts in the app's language: off, connecting, connected, error,
+/// connect, disconnect, open the app, quit.
+#[cfg(target_os = "macos")]
+pub fn menu_texts(t: &crate::texts::Texts) {
+    let texts = [t.not_connected, t.connecting, t.connected, t.could_not_connect, t.connect, t.disconnect, t.open_app, t.quit].map(c);
+    let pointers: Vec<*const c_char> = texts.iter().map(|s| s.as_ptr()).collect();
+    unsafe { nc_menu_texts(pointers.as_ptr(), pointers.len() as c_int) };
+}
 
 pub fn open_url(url: &str) {
     let url = c(url);
@@ -122,7 +136,12 @@ pub fn core_version() -> String {
 #[unsafe(no_mangle)]
 pub extern "C" fn nc_event(kind: c_int, text: *const c_char) {
     let text = if text.is_null() { String::new() } else { unsafe { CStr::from_ptr(text) }.to_string_lossy().into_owned() };
-    let event = if kind == EVENT_FETCHED { Event::Fetched(text) } else { Event::State(kind, text) };
+    let event = match kind {
+        EVENT_FETCHED => Event::Fetched(text),
+        #[cfg(target_os = "macos")]
+        EVENT_TOGGLE => Event::Toggle,
+        _ => Event::State(kind, text),
+    };
     EVENTS.lock().unwrap_or_else(|e| e.into_inner()).push(event);
     if let Some((waker, id)) = WAKE.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
         waker.invalidate(*id, Dirty::APPLY);

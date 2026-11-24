@@ -25,13 +25,103 @@ static BOOL stopping;
 /// A configuration to start once the running tunnel is down (a switch of server while connected).
 static NSString *pendingConfig;
 
-static void emit(int kind, NSString *text) { nc_event(kind, (text ?: @"").UTF8String); }
+#if TARGET_OS_OSX
+static void showState(int kind);
+#endif
+
+static void emit(int kind, NSString *text) {
+#if TARGET_OS_OSX
+    // The menu bar icon follows the tunnel's state.
+    if (kind >= 0 && kind <= 4) {
+        dispatch_async(dispatch_get_main_queue(), ^{ showState(kind); });
+    }
+#endif
+    nc_event(kind, (text ?: @"").UTF8String);
+}
 
 static char *copied(NSString *text) { return strdup((text ?: @"").UTF8String); }
 
 void nc_free(char *text) { free(text); }
 
 #if TARGET_OS_OSX
+// ---------------------------------------------------------------- the menu bar icon (macOS)
+// Always there while the app runs, as VPN apps have it: a shield that shows the state, and a menu
+// with the state, Connect / Disconnect (event 12 for the app), the app's window, Quit.
+
+static NSStatusItem *statusItem;
+static NSMenuItem *stateLine, *toggleLine, *openLine, *quitLine;
+/// Off, connecting, connected, error, connect, disconnect, open, quit: in the app's language.
+static NSArray<NSString *> *menuTexts;
+static int shownState;
+
+@interface NCMenuTarget : NSObject
+@end
+@implementation NCMenuTarget
+- (void)toggle:(id)sender { nc_event(12, ""); }
+- (void)open:(id)sender {
+    [NSApp activateIgnoringOtherApps:YES];
+    for (NSWindow *window in NSApp.windows) {
+        if (window.canBecomeMainWindow) {
+            [window deminiaturize:nil];
+            [window makeKeyAndOrderFront:nil];
+        }
+    }
+}
+- (void)quit:(id)sender { [NSApp terminate:nil]; }
+@end
+static NCMenuTarget *menuTarget;
+
+static NSString *menuText(NSUInteger i, NSString *fallback) {
+    return i < menuTexts.count ? menuTexts[i] : fallback;
+}
+
+static void showState(int kind) {
+    shownState = kind;
+    if (statusItem == nil) return;
+    // 0 off, 1 connecting, 2 connected, 3 error, 4 connected but no answer.
+    NSString *symbol = kind == 2 ? @"shield.fill" : kind == 1 ? @"shield.lefthalf.filled"
+                     : (kind == 3 || kind == 4) ? @"exclamationmark.shield" : @"shield";
+    NSImage *image = [NSImage imageWithSystemSymbolName:symbol accessibilityDescription:@"Net Connect"];
+    image.template = YES;
+    statusItem.button.image = image;
+    NSString *state = kind == 2 || kind == 4 ? menuText(2, @"Connected") : kind == 1 ? menuText(1, @"Connecting")
+                    : kind == 3 ? menuText(3, @"Could not connect") : menuText(0, @"Not connected");
+    statusItem.button.toolTip = [NSString stringWithFormat:@"Net Connect: %@", state];
+    stateLine.title = state;
+    BOOL on = kind == 1 || kind == 2 || kind == 4;
+    toggleLine.title = on ? menuText(5, @"Disconnect") : menuText(4, @"Connect");
+    openLine.title = menuText(6, @"Open Net Connect");
+    quitLine.title = menuText(7, @"Quit");
+}
+
+static void makeStatusItem(void) {
+    if (statusItem != nil) return;
+    menuTarget = [NCMenuTarget new];
+    statusItem = [NSStatusBar.systemStatusBar statusItemWithLength:NSSquareStatusItemLength];
+    NSMenu *menu = [NSMenu new];
+    menu.autoenablesItems = NO;
+    stateLine = [menu addItemWithTitle:@"" action:nil keyEquivalent:@""];
+    stateLine.enabled = NO;
+    [menu addItem:NSMenuItem.separatorItem];
+    toggleLine = [menu addItemWithTitle:@"" action:@selector(toggle:) keyEquivalent:@""];
+    openLine = [menu addItemWithTitle:@"" action:@selector(open:) keyEquivalent:@""];
+    [menu addItem:NSMenuItem.separatorItem];
+    quitLine = [menu addItemWithTitle:@"" action:@selector(quit:) keyEquivalent:@"q"];
+    for (NSMenuItem *item in @[toggleLine, openLine, quitLine]) item.target = menuTarget;
+    statusItem.menu = menu;
+    showState(shownState);
+}
+
+void nc_menu_texts(const char *const *texts, int count) {
+    NSMutableArray *list = [NSMutableArray array];
+    for (int i = 0; i < count; i++) [list addObject:[NSString stringWithUTF8String:texts[i]] ?: @""];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        menuTexts = list;
+        makeStatusItem();
+        showState(shownState);
+    });
+}
+
 /// macOS: the tunnel is a system extension inside the app, which the system installs on request
 /// (asking the user once in System Settings) before any configuration can use it.
 /// The extension waits for the user to turn it on (System Settings).

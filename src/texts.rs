@@ -48,6 +48,11 @@ pub struct Texts {
     pub permission_denied: &'static str,
     /// macOS: the tunnel (a system extension) waits for the user to turn it on.
     pub allow_extension: &'static str,
+    /// macOS menu bar: brings the app's window up; ends the app.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub open_app: &'static str,
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub quit: &'static str,
     pub no_server: &'static str,
     pub servers: &'static str,
     pub empty: &'static str,
@@ -105,6 +110,8 @@ pub static EN: Texts = Texts {
     answers_in: "The server answers in {} ms",
     permission_denied: "The VPN permission was not given",
     allow_extension: "Turn on Net Connect in System Settings › General › Login Items & Extensions › Network Extensions",
+    open_app: "Open Net Connect",
+    quit: "Quit",
     no_server: "No server",
     servers: "SERVERS",
     empty: "No servers yet.\nCopy a vless:// link and tap Import.",
@@ -155,6 +162,8 @@ pub static RU: Texts = Texts {
     answers_in: "Сервер отвечает за {} мс",
     permission_denied: "Разрешение на VPN не получено",
     allow_extension: "Включите Net Connect: Системные настройки › Основные › Объекты входа и расширения › Сетевые расширения",
+    open_app: "Открыть Net Connect",
+    quit: "Выйти",
     no_server: "Нет сервера",
     servers: "СЕРВЕРЫ",
     empty: "Серверов пока нет.\nСкопируйте ссылку vless:// и нажмите «Импорт».",
