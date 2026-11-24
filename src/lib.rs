@@ -91,9 +91,11 @@ const RELEASE_ASSET: &str = "-armv7.apk";
 /// macOS: one universal app, netconnect-012-macos.zip for 0.1.2.
 #[cfg(target_os = "macos")]
 const RELEASE_ASSET: &str = "-macos.zip";
-/// Windows: netconnect-013-windows-x64.zip for 0.1.3.
-#[cfg(windows)]
+/// Windows: netconnect-013-windows-x64.zip / -windows-arm64.zip for 0.1.3.
+#[cfg(all(windows, not(target_arch = "aarch64")))]
 const RELEASE_ASSET: &str = "-windows-x64.zip";
+#[cfg(all(windows, target_arch = "aarch64"))]
+const RELEASE_ASSET: &str = "-windows-arm64.zip";
 /// iOS installs come through TestFlight or Ad Hoc: no update check there, and no Settings section.
 const UPDATES: bool = !cfg!(target_os = "ios");
 const UPDATE_CHECK_EVERY: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
@@ -173,9 +175,9 @@ impl Vpn {
     fn color(self) -> u32 {
         match self {
             Vpn::Off => TEXT,
-            Vpn::Connecting | Vpn::NoResponse => AMBER,
+            Vpn::Connecting => AMBER,
             Vpn::Connected => GREEN,
-            Vpn::Error => RED,
+            Vpn::Error | Vpn::NoResponse => RED,
         }
     }
     fn title(self, t: &Texts) -> &'static str {
