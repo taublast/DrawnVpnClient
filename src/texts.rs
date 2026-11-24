@@ -90,6 +90,10 @@ pub struct Texts {
     pub update_available: &'static str,
     pub download: &'static str,
     pub later: &'static str,
+    pub check_now: &'static str,
+    pub checking: &'static str,
+    pub up_to_date: &'static str,
+    pub update_check_failed: &'static str,
     pub version: &'static str,
 }
 
@@ -149,6 +153,10 @@ pub static EN: Texts = Texts {
     update_available: "Net Connect {} is available",
     download: "Download",
     later: "Later",
+    check_now: "Check now",
+    checking: "Checking…",
+    up_to_date: "You have the latest version",
+    update_check_failed: "Could not check for updates",
     version: "Version",
 };
 
@@ -201,5 +209,9 @@ pub static RU: Texts = Texts {
     update_available: "Доступна версия Net Connect {}",
     download: "Скачать",
     later: "Позже",
+    check_now: "Проверить сейчас",
+    checking: "Проверка…",
+    up_to_date: "У вас последняя версия",
+    update_check_failed: "Не удалось проверить обновления",
     version: "Версия",
 };

@@ -210,6 +210,8 @@ struct App {
     skipped_update: String,
     check_updates: bool,
     last_update_check: Option<std::time::Instant>,
+    /// "Check now" was tapped: its answer is told in a toast.
+    manual_check: bool,
     /// The phone's language code.
     system_lang: String,
     core_version: String,
@@ -272,7 +274,25 @@ impl App {
                 // Sent at start and whenever the app comes back to the screen.
                 self.check_for_updates();
             }
-            Event::Fetched(json) => self.update = update::newer(&json, env!("CARGO_PKG_VERSION"), RELEASE_ASSET),
+            Event::Fetched(json) => {
+                self.update = update::newer(&json, env!("CARGO_PKG_VERSION"), RELEASE_ASSET);
+                if std::mem::take(&mut self.manual_check) {
+                    let t = self.t();
+                    let text = match &self.update {
+                        _ if json.is_empty() => t.update_check_failed.to_owned(),
+                        Some(update) => {
+                            // Asked for by hand: a version put off with Later is offered again.
+                            if self.skipped_update == update.version {
+                                self.skipped_update.clear();
+                                self.save();
+                            }
+                            Texts::fill(t.update_available, &update.version)
+                        }
+                        None => t.up_to_date.to_owned(),
+                    };
+                    cx.show_toast(self.shell, &text, 2500.0);
+                }
+            }
             #[cfg(target_os = "macos")]
             Event::Toggle => self.toggle(cx),
         }
@@ -449,6 +469,16 @@ impl App {
             self.last_update_check = Some(std::time::Instant::now());
             platform::fetch(RELEASES);
         }
+    }
+
+    /// Settings' "Check now": asks GitHub at once, whatever the daily timer says.
+    fn check_now(&mut self) {
+        if self.manual_check {
+            return;
+        }
+        self.manual_check = true;
+        self.last_update_check = Some(std::time::Instant::now());
+        platform::fetch(RELEASES);
     }
 
     /// The update to show: not the version put off with Later.
@@ -1044,6 +1074,29 @@ fn settings_page(app: &mut App) -> Build<SkiaLayout> {
                         app.check_for_updates();
                     }),
             ))),
+        hoverable(SkiaShape::new())
+            .corner_radius(14)
+            .height_request(48)
+            .fill_x()
+            .stroke_color(rgb(LINE))
+            .stroke_width(2)
+            .animation_tapped(SkiaTouchAnimation::Ripple)
+            .accessibility_role(Aria::BUTTON)
+            .observe(|me, app: &App| {
+                me.set_is_visible(UPDATES);
+                me.set_background_color(shade(SURFACE, app.hovered == Some(me.id())));
+                me.set_accessibility_label(if app.manual_check { app.t().checking } else { app.t().check_now });
+            })
+            .on_tapped(|_me, app: &mut App, _cx| app.check_now())
+            .children(
+                SkiaLabel::new("")
+                    .font_family("FontTextBold")
+                    .font_size(15)
+                    .text_color(rgb(TEXT))
+                    .center()
+                    .accessibility_role(Aria::PRESENTATION)
+                    .observe(|me, app: &App| me.set_text(if app.manual_check { app.t().checking } else { app.t().check_now })),
+            ),
         section_title().margin((0, 16, 0, 0)).observe(|me, app: &App| me.set_text(app.t().about)),
         SkiaLabel::new("").font_size(14).text_color(rgb(MUTED)).fill_x().observe(|me, app: &App| {
             let mut text = format!("{} {}", app.t().version, env!("CARGO_PKG_VERSION"));
