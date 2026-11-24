@@ -177,6 +177,10 @@ void nc_start(void) {
         if (found) {
             watch(found);
             statusChanged();
+        } else {
+            // No configuration yet (the first start): off. The app's first state event also
+            // fills its texts.
+            emit(0, @"");
         }
     });
 }
