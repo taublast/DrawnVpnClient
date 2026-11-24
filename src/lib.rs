@@ -737,7 +737,7 @@ fn entry_dialog(app: &mut App) -> Build<SkiaLayout> {
                 .text_color(rgb(TEXT))
                 .placeholder_text(t.link_placeholder)
                 .placeholder_color(rgb(MUTED))
-                .max_lines(10)
+                .max_lines(4)
                 .auto_height(true)
                 .return_type(ReturnType::Done)
                 .corner_radius(10)
