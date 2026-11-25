@@ -93,9 +93,9 @@ const RELEASES: &str = "https://api.github.com/repos/taublast/DrawnVpnClient/rel
 const RELEASE_ASSET: &str = "-arm64.apk";
 #[cfg(target_arch = "arm")]
 const RELEASE_ASSET: &str = "-armv7.apk";
-/// macOS: one universal app, netconnect-012-macos.zip for 0.1.2.
+/// macOS: one universal app, netconnect-013-macos.dmg for 0.1.3.
 #[cfg(target_os = "macos")]
-const RELEASE_ASSET: &str = "-macos.zip";
+const RELEASE_ASSET: &str = "-macos.dmg";
 /// Windows: netconnect-013-windows-x64.zip / -windows-arm64.zip for 0.1.3.
 #[cfg(all(windows, not(target_arch = "aarch64")))]
 const RELEASE_ASSET: &str = "-windows-x64.zip";
