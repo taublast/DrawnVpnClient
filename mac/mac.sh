@@ -1,10 +1,10 @@
 #!/bin/sh
 # macOS, on a Mac with Xcode and Go 1.27+: builds the app (Rust, DrawnUI) and its connection system
 # extension (Swift + the engine: Xray-core as a Go C archive), both universal (Apple silicon + Intel),
-# signs them with Developer ID and notarizes them, and zips the release:
-# target/.../macos/netconnect-<version without dots>-macos.zip.
-#   mac/mac.sh            build, sign, notarize, zip, install into /Applications and open
-#   mac/mac.sh release    build, sign, notarize, zip
+# signs them with Developer ID and notarizes them, and packs the release as a drag-to-install disk
+# image: target/.../macos/netconnect-<version without dots>-macos.dmg.
+#   mac/mac.sh            build, sign, notarize, make the DMG, install into /Applications and open
+#   mac/mac.sh release    build, sign, notarize, make the DMG
 #   mac/mac.sh build      build only, ad-hoc signed (for checking the build; it cannot connect)
 # A system extension runs only from /Applications; the first connect asks the user to allow it in
 # System Settings > Privacy & Security, then to allow the VPN configuration.
@@ -14,6 +14,10 @@
 # signing makes the profiles the tunnel and the system extension need, signs with the team's
 # cloud-managed Developer ID certificate and submits for notarization. Nothing of the account is
 # stored here. The team: MAC_TEAM from the environment or mac/signing.properties (not in git).
+# The DMG itself is signed and notarized only when this Mac has the team's own "Developer ID
+# Application" certificate and a notarytool keychain profile (MAC_NOTARY_PROFILE, made with
+# `xcrun notarytool store-credentials`); otherwise it ships unsigned, which is fine: the app in it
+# is signed, notarized and stapled, and that is what Gatekeeper checks.
 set -eu
 cd "$(dirname "$0")/.."
 root="$PWD"
@@ -37,7 +41,7 @@ done
 if [ -f mac/signing.properties ]; then
     while IFS='=' read -r key value; do
         case "$key" in
-            MAC_TEAM)
+            MAC_TEAM|MAC_NOTARY_PROFILE)
                 eval "current=\${$key:-}"
                 [ -n "$current" ] || export "$key=$value" ;;
         esac
@@ -259,13 +263,31 @@ xcrun stapler validate "$release" >/dev/null
 spctl --assess --type execute "$release" >/dev/null
 echo "notarized, stapled, and Gatekeeper accepts it"
 
-zip="$work/netconnect-$(echo "$version" | tr -d .)-macos.zip"
-rm -f "$zip"
-ditto -c -k --keepParent "$release" "$zip"
-echo "release: $zip"
+# 7. The DMG: the app and a link to Applications to drag it onto.
+dmg="$work/netconnect-$(echo "$version" | tr -d .)-macos.dmg"
+rm -rf "$tmp/dmg" "$dmg"
+mkdir -p "$tmp/dmg"
+ditto "$release" "$tmp/dmg/$name.app"
+ln -s /Applications "$tmp/dmg/Applications"
+hdiutil create -quiet -volname "$name" -srcfolder "$tmp/dmg" -fs HFS+ -format UDZO -ov "$dmg"
+identity=$(security find-identity -v -p codesigning \
+    | sed -n "s/.*\"\(Developer ID Application: .*($team)\)\"/\1/p" | head -n 1)
+profile="${MAC_NOTARY_PROFILE:-}"
+if [ -n "$identity" ] && [ -n "$profile" ]; then
+    if codesign --force --sign "$identity" --timestamp "$dmg" \
+            && xcrun notarytool submit "$dmg" --keychain-profile "$profile" --wait > "$work/notarize-dmg.log" 2>&1 \
+            && xcrun stapler staple "$dmg" >/dev/null; then
+        echo "the DMG is signed, notarized and stapled too"
+    else
+        echo "note: signing or notarizing the DMG failed (see $work/notarize-dmg.log); the app in it is notarized"
+    fi
+else
+    echo "note: the DMG itself is not signed (no Developer ID Application certificate of $team or no MAC_NOTARY_PROFILE); the app in it is signed and notarized"
+fi
+echo "release: $dmg"
 [ "$action" = release ] && exit 0
 
-# 7. Install: the extension can only be activated from /Applications. A running copy is quit
+# 8. Install: the extension can only be activated from /Applications. A running copy is quit
 # first; the old bundle moves aside before the new one is copied in.
 installed="/Applications/$name.app"
 osascript -e "tell application id \"$bundle_id\" to quit" >/dev/null 2>&1 || true
